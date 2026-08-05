@@ -1,0 +1,59 @@
+# secguard GitLab CI starter
+#
+# secguard writes an includable snippet instead of overwriting `.gitlab-ci.yml`.
+# Add this to your pipeline:
+#
+#   include:
+#     - local: '.gitlab/secguard.gitlab-ci.yml'
+
+.secguard_base:
+  image: python:3.12-slim
+  before_script:
+    - python -m pip install --no-cache-dir secrets-hygiene-kit
+
+secguard:waivers:
+  extends: .secguard_base
+  stage: test
+  script:
+    - secguard waivers check --file .secguard/waivers.yaml
+    - secguard playbooks check
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+secguard:gate:
+  extends: .secguard_base
+  stage: test
+  # Detection runs in a job your team controls and pins. Have it publish
+  # gitleaks.json, trufflehog.jsonl, or .secrets.baseline as an artifact, then
+  # let this job consume the report and decide block or pass.
+  needs:
+    - job: secrets:detect
+      artifacts: true
+      optional: true
+  script:
+    - |
+      args=""
+      for report in gitleaks.json trufflehog.jsonl .secrets.baseline; do
+        if [ -f "$report" ]; then
+          args="$args --input $report"
+        fi
+      done
+      if [ -z "$args" ]; then
+        echo "no scanner report found; skipping the secguard gate"
+        exit 0
+      fi
+      secguard scan check $args \
+        --waivers .secguard/waivers.yaml \
+        --fail-on high \
+        --sarif secguard.sarif \
+        --markdown secguard-report.md
+  artifacts:
+    when: always
+    expire_in: 7 days
+    paths:
+      - secguard.sarif
+      - secguard-report.md
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

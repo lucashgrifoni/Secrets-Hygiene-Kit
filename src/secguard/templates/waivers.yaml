@@ -1,0 +1,4 @@
+# Add only reviewed, time-bound exceptions here.
+# Do not store secret values or detector match text in this file.
+schema: "secguard.waiver/v1"
+waivers: []

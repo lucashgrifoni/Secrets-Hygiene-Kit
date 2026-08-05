@@ -1,0 +1,25 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+dist/
+build/
+.venv/
+.env
+.env.*
+
+# Scanner reports that carry the credential itself. These must never be
+# committed, even in a repository whose job is to read them. A detect-secrets
+# baseline is deliberately NOT listed here: it stores digests, not credentials,
+# and teams are meant to commit it.
+gitleaks.json
+trufflehog.jsonl
+trufflehog.json
+
+# secguard outputs
+secguard.sarif
+secguard-report.md
+secguard-comment.md
+

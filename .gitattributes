@@ -1,0 +1,22 @@
+# Normalize to LF in the repository and on checkout.
+#
+# This project ships shell fragments inside action.yml and the CI templates, and
+# those run on Linux runners. A CRLF line ending sneaking in from a Windows
+# checkout breaks them in ways that only show up in CI, so pin the ending rather
+# than depending on each contributor's core.autocrlf.
+* text=auto eol=lf
+
+*.py    text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.json  text eol=lf
+*.jsonl text eol=lf
+*.toml  text eol=lf
+*.cfg   text eol=lf
+
+LICENSE  text eol=lf
+py.typed text eol=lf
+
+# Keep diffs on generated evidence readable but never merged by hand.
+*.sarif linguist-generated=true

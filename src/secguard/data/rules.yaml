@@ -1,0 +1,138 @@
+# secguard rule catalog
+#
+# Maps detector-native rule identifiers to a canonical secret type, a default
+# severity, and the remediation playbook a responder should follow.
+#
+# Mappings are best effort. Detector rule identifiers change between releases,
+# so an unmapped rule falls back to `fallback_secret_type` and secguard marks
+# the finding as `mapping: fallback` instead of guessing a provider-specific
+# response. Extend or override locally with `.secguard/rules.yaml`.
+#
+# This file must never contain secret values, detector match text, or patterns
+# that reproduce a credential.
+
+schema: "secguard.rules/v1"
+
+fallback_secret_type: generic-api-key
+
+secret_types:
+  aws-access-key:
+    title: "AWS access key ID"
+    severity: high
+    playbook: aws-access-key
+  aws-secret-access-key:
+    title: "AWS secret access key"
+    severity: critical
+    playbook: aws-secret-access-key
+  github-pat:
+    title: "GitHub personal access token"
+    severity: high
+    playbook: github-pat
+  github-app-private-key:
+    title: "GitHub App private key"
+    severity: critical
+    playbook: github-app-private-key
+  slack-bot-token:
+    title: "Slack bot or user token"
+    severity: high
+    playbook: slack-bot-token
+  slack-webhook:
+    title: "Slack incoming webhook URL"
+    severity: medium
+    playbook: slack-webhook
+  stripe-secret-key:
+    title: "Stripe secret or restricted key"
+    severity: critical
+    playbook: stripe-secret-key
+  gcp-service-account-json:
+    title: "Google Cloud service account key"
+    severity: critical
+    playbook: gcp-service-account-json
+  azure-storage-key:
+    title: "Azure Storage account access key"
+    severity: high
+    playbook: azure-storage-key
+  postgres-uri:
+    title: "PostgreSQL connection URI with credentials"
+    severity: high
+    playbook: postgres-uri
+  jwt-signing-key:
+    title: "JWT signing key or signed token"
+    severity: high
+    playbook: jwt-signing-key
+  generic-private-key:
+    title: "Private key material"
+    severity: critical
+    playbook: generic-private-key
+  generic-api-key:
+    title: "Unclassified API key or credential"
+    severity: medium
+    playbook: generic-api-key
+
+detectors:
+  # gitleaks rule IDs from the default rule pack.
+  gitleaks:
+    aws-access-token: aws-access-key
+    github-pat: github-pat
+    github-fine-grained-pat: github-pat
+    github-oauth: github-pat
+    github-app-token: github-pat
+    github-refresh-token: github-pat
+    slack-bot-token: slack-bot-token
+    slack-user-token: slack-bot-token
+    slack-app-token: slack-bot-token
+    slack-config-access-token: slack-bot-token
+    slack-legacy-bot-token: slack-bot-token
+    slack-legacy-workspace-token: slack-bot-token
+    slack-webhook-url: slack-webhook
+    stripe-access-token: stripe-secret-key
+    gcp-service-account: gcp-service-account-json
+    gcp-api-key: gcp-service-account-json
+    private-key: generic-private-key
+    jwt: jwt-signing-key
+    jwt-base64: jwt-signing-key
+    generic-api-key:
+      secret_type: generic-api-key
+      severity: low
+
+  # trufflehog DetectorName values.
+  trufflehog:
+    AWS: aws-access-key
+    Github: github-pat
+    GithubApp: github-app-private-key
+    GitHubOauth2: github-pat
+    Slack: slack-bot-token
+    SlackWebhook: slack-webhook
+    Stripe: stripe-secret-key
+    GCP: gcp-service-account-json
+    PrivateKey: generic-private-key
+    JWT: jwt-signing-key
+    Postgres: postgres-uri
+
+  # detect-secrets plugin `type` values.
+  detect-secrets:
+    "AWS Access Key": aws-access-key
+    "Azure Storage Account access key": azure-storage-key
+    "GitHub Token": github-pat
+    "Slack Token": slack-bot-token
+    "Slack Webhook": slack-webhook
+    "Stripe Access Key": stripe-secret-key
+    "Private Key": generic-private-key
+    "JSON Web Token": jwt-signing-key
+    "Basic Auth Credentials":
+      secret_type: generic-api-key
+      severity: medium
+    "Secret Keyword":
+      secret_type: generic-api-key
+      severity: low
+    "Base64 High Entropy String":
+      secret_type: generic-api-key
+      severity: low
+    "Hex High Entropy String":
+      secret_type: generic-api-key
+      severity: low
+
+  # secguard synthetic fixture rule IDs used by tests and demos.
+  synthetic:
+    aws-access-key: aws-access-key
+    generic-api-key: generic-api-key

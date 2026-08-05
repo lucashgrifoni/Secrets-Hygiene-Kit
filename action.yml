@@ -1,0 +1,135 @@
+name: "secguard secret hygiene gate"
+description: >-
+  Normalize gitleaks, trufflehog, and detect-secrets reports into one canonical
+  finding set, apply the waiver lifecycle, and fail the build on unwaived
+  findings or expired waivers. Reads reports; never runs a scanner and never
+  rotates a credential.
+author: "Lucas Henrique Grifoni"
+
+branding:
+  icon: "shield"
+  color: "red"
+
+inputs:
+  reports:
+    description: >-
+      Newline- or space-separated scanner report paths. Missing paths are
+      skipped, so you can list every report your pipeline might produce.
+    required: false
+    default: |
+      gitleaks.json
+      trufflehog.jsonl
+      .secrets.baseline
+  waivers:
+    description: "Path to the secguard waiver file."
+    required: false
+    default: ".secguard/waivers.yaml"
+  fail-on:
+    description: "Blocking severity threshold: none, info, low, medium, high, critical."
+    required: false
+    default: "high"
+  rules:
+    description: "Optional local rule catalog merged over the packaged catalog."
+    required: false
+    default: ""
+  sarif-output:
+    description: "Where to write the SARIF 2.1.0 log. Empty disables SARIF output."
+    required: false
+    default: "secguard.sarif"
+  markdown-output:
+    description: "Where to write the Markdown report. Empty disables it."
+    required: false
+    default: "secguard-report.md"
+  comment-output:
+    description: "Where to write the compact pull-request comment. Empty disables it."
+    required: false
+    default: "secguard-comment.md"
+  check-playbooks:
+    description: "Also fail when a packaged playbook is past its review window."
+    required: false
+    default: "true"
+  python-version:
+    description: "Python version used to install secguard."
+    required: false
+    default: "3.12"
+
+outputs:
+  verdict:
+    description: "PASS or BLOCK."
+    value: ${{ steps.gate.outputs.verdict }}
+  reports-found:
+    description: "Number of scanner reports that were actually present."
+    value: ${{ steps.collect.outputs.count }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install secguard
+      shell: bash
+      run: python -m pip install --disable-pip-version-check "secrets-hygiene-kit==0.2.0"
+
+    - name: Check waiver lifecycle
+      shell: bash
+      run: |
+        if [ -f "${{ inputs.waivers }}" ]; then
+          secguard waivers check --file "${{ inputs.waivers }}"
+        else
+          echo "no waiver file at ${{ inputs.waivers }}; skipping the lifecycle check"
+        fi
+
+    - name: Check playbook freshness
+      if: inputs.check-playbooks == 'true'
+      shell: bash
+      run: secguard playbooks check
+
+    - name: Collect scanner reports
+      id: collect
+      shell: bash
+      run: |
+        args=""
+        count=0
+        while read -r report; do
+          [ -z "$report" ] && continue
+          if [ -f "$report" ]; then
+            args="$args --input $report"
+            count=$((count + 1))
+          else
+            echo "skipping missing report: $report"
+          fi
+        done <<< "$(echo "${{ inputs.reports }}" | tr ' ' '\n')"
+        echo "count=$count" >> "$GITHUB_OUTPUT"
+        echo "args=$args" >> "$GITHUB_OUTPUT"
+
+    - name: Secret hygiene gate
+      id: gate
+      if: steps.collect.outputs.count != '0'
+      shell: bash
+      run: |
+        extra=""
+        [ -n "${{ inputs.rules }}" ] && extra="$extra --rules ${{ inputs.rules }}"
+        [ -n "${{ inputs.sarif-output }}" ] && extra="$extra --sarif ${{ inputs.sarif-output }}"
+        [ -n "${{ inputs.markdown-output }}" ] && extra="$extra --markdown ${{ inputs.markdown-output }}"
+        [ -n "${{ inputs.comment-output }}" ] && extra="$extra --pr-comment ${{ inputs.comment-output }}"
+
+        if secguard scan check ${{ steps.collect.outputs.args }} \
+          --waivers "${{ inputs.waivers }}" \
+          --fail-on "${{ inputs.fail-on }}" \
+          $extra; then
+          echo "verdict=PASS" >> "$GITHUB_OUTPUT"
+        else
+          status=$?
+          echo "verdict=BLOCK" >> "$GITHUB_OUTPUT"
+          exit $status
+        fi
+
+    - name: Report no scanner input
+      if: steps.collect.outputs.count == '0'
+      shell: bash
+      run: |
+        echo "::warning title=secguard::No scanner report was found, so no finding gate ran."
+        echo "secguard reads reports; add a detector step that writes one of: ${{ inputs.reports }}"

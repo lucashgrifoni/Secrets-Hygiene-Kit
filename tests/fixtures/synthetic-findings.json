@@ -1,0 +1,24 @@
+{
+  "schema": "secguard.synthetic-findings/v1",
+  "scanner": "gitleaks",
+  "findings": [
+    {
+      "rule_id": "aws-access-key",
+      "path": "src/example_config.py",
+      "line": 12,
+      "column": 7,
+      "severity": "high",
+      "message": "Synthetic scanner hit for an AWS access key pattern.",
+      "fingerprint": "synthetic-gitleaks-src-example-config-12",
+      "remediation": "Follow the AWS access key playbook and rotate through the account owner."
+    },
+    {
+      "rule_id": "generic-api-key",
+      "path": "docs/example.env",
+      "line": 4,
+      "severity": "medium",
+      "message": "Synthetic scanner hit for a generic API key pattern.",
+      "fingerprint": "synthetic-gitleaks-docs-example-env-4"
+    }
+  ]
+}

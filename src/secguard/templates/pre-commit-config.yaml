@@ -1,0 +1,33 @@
+# secguard pre-commit starter
+#
+# Prevention layer. secguard does not detect secrets, so pair it with a
+# detector hook. Pin `rev` to a tag or commit your team has reviewed rather
+# than tracking a moving branch: a pre-commit hook runs with the developer's
+# own credentials on every commit.
+#
+# repos:
+#   - repo: https://github.com/gitleaks/gitleaks
+#     rev: <pin-a-reviewed-tag>
+#     hooks:
+#       - id: gitleaks
+#
+#   - repo: https://github.com/Yelp/detect-secrets
+#     rev: <pin-a-reviewed-tag>
+#     hooks:
+#       - id: detect-secrets
+#         args: ["--baseline", ".secrets.baseline"]
+
+repos:
+  - repo: local
+    hooks:
+      - id: secguard-waivers-check
+        name: secguard waiver expiry check
+        entry: secguard waivers check --file .secguard/waivers.yaml
+        language: system
+        pass_filenames: false
+
+      - id: secguard-playbooks-check
+        name: secguard playbook freshness check
+        entry: secguard playbooks check
+        language: system
+        pass_filenames: false

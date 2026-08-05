@@ -1,0 +1,79 @@
+name: secguard
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  secguard:
+    name: Secret hygiene gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install secguard
+        run: python -m pip install secrets-hygiene-kit
+
+      - name: Check waiver lifecycle
+        run: secguard waivers check --file .secguard/waivers.yaml
+
+      - name: Check playbook freshness
+        run: secguard playbooks check
+
+      # Detection step. secguard reads reports and never runs a scanner, so add
+      # the detector your team already trusts and pin it by commit SHA. Let the
+      # detector exit non-zero without failing the job: the secguard gate below
+      # is what decides block or pass.
+      #
+      # - name: Run gitleaks
+      #   run: |
+      #     gitleaks detect --no-banner --redact \
+      #       --report-format json --report-path gitleaks.json || true
+
+      - name: Secret hygiene gate
+        if: hashFiles('gitleaks.json', 'trufflehog.jsonl', '.secrets.baseline') != ''
+        run: |
+          args=""
+          for report in gitleaks.json trufflehog.jsonl .secrets.baseline; do
+            if [ -f "$report" ]; then
+              args="$args --input $report"
+            fi
+          done
+          secguard scan check $args \
+            --waivers .secguard/waivers.yaml \
+            --fail-on high \
+            --sarif secguard.sarif \
+            --pr-comment secguard-comment.md
+
+      # Publishing to code scanning needs `security-events: write` on this job
+      # and an action pinned by commit SHA.
+      #
+      # - name: Upload SARIF
+      #   if: always() && hashFiles('secguard.sarif') != ''
+      #   uses: github/codeql-action/upload-sarif@<pin-a-reviewed-sha>
+      #   with:
+      #     sarif_file: secguard.sarif
+
+      - name: Upload secguard evidence
+        if: always() && hashFiles('secguard.sarif') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: secguard-evidence
+          path: |
+            secguard.sarif
+            secguard-comment.md
+          retention-days: 7
