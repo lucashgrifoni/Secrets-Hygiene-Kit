@@ -13,36 +13,169 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Test on Python ${{ matrix.python-version }}
+  build:
+    name: Build and audit distribution
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.12", "3.13"]
+    timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install build and audit tools
+        run: >-
+          python -m pip install --disable-pip-version-check
+          build==1.6.1 setuptools==84.0.0 wheel==0.48.0 pip-audit==2.10.1
+
+      - name: Build wheel and sdist
+        run: python -m build --no-isolation
+
+      - name: Verify clean installations and record resolved runtime dependencies
+        run: python scripts/verify_distribution.py --requirements-output dist/runtime-requirements.txt
+
+      # Audit the resolved runtime, excluding the build and audit tools.
+      # Neither a finding nor a dependency collection failure is ignored.
+      - name: Audit resolved runtime dependencies
+        run: >-
+          python -m pip_audit --requirement dist/runtime-requirements.txt
+          --strict --no-deps --disable-pip --progress-spinner off
+          --format json --output dist/pip-audit.json
+
+      - name: Generate runtime CycloneDX SBOM
+        run: >-
+          python -m pip_audit --requirement dist/runtime-requirements.txt
+          --strict --no-deps --disable-pip --progress-spinner off
+          --format cyclonedx-json --output dist/runtime.cdx.json
+
+      - name: Generate checksums for release assets
+        run: |
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+
+          dist = Path("dist")
+          assets = sorted(path for path in dist.iterdir() if path.is_file() and path.name != "SHA256SUMS")
+          required = {"runtime-requirements.txt", "pip-audit.json", "runtime.cdx.json"}
+          if not required <= {path.name for path in assets}:
+              raise SystemExit("release evidence is missing")
+          lines = [f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}" for path in assets]
+          (dist / "SHA256SUMS").write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+
+      - name: Upload release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-assets
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Preserve dependency audit diagnostics
+        if: failure() && hashFiles('dist/pip-audit.json') != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dependency-audit-failure
+          path: dist/pip-audit.json
+          if-no-files-found: error
+          retention-days: 7
+
+  test:
+    name: CLI on ${{ matrix.os }} / Python ${{ matrix.python-version }}
+    needs: build
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.12", "3.13", "3.14"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
-          cache: "pip"
+          cache: pip
 
-      - name: Install
-        run: python -m pip install -e ".[dev]"
+      - name: Install contributor environment and runtime audit tool
+        run: python -m pip install --disable-pip-version-check -e ".[dev]" pip-audit==2.10.1
+
+      - name: Test
+        run: python -m pytest
+
+      - name: Download the built distribution
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-assets
+          path: dist
+
+      - name: Verify wheel and sdist on this platform
+        run: python scripts/verify_distribution.py --requirements-output runtime-requirements.txt
+
+      - name: Audit runtime resolved for this OS and Python
+        run: >-
+          python -m pip_audit --requirement runtime-requirements.txt
+          --strict --no-deps --disable-pip --progress-spinner off
+          --format json --output runtime-audit.json
+
+      - name: Upload platform runtime audit
+        if: always() && hashFiles('runtime-audit.json') != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: runtime-audit-${{ matrix.os }}-${{ matrix.python-version }}
+          path: |
+            runtime-requirements.txt
+            runtime-audit.json
+          if-no-files-found: error
+          retention-days: 7
+
+  security:
+    name: Lint and source security scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install validation tools
+        run: python -m pip install --disable-pip-version-check -e ".[dev]" bandit==1.9.4
 
       - name: Lint
         run: |
           python -m ruff check .
           python -m ruff format --check .
 
-      - name: Test
-        run: python -m pytest
+      - name: Scan application source with Bandit
+        run: |
+          mkdir -p reports
+          python -m bandit --recursive src --format json --output reports/bandit.json
+
+      - name: Upload source scan evidence
+        if: always() && hashFiles('reports/bandit.json') != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: source-security-scan
+          path: reports/bandit.json
+          if-no-files-found: error
+          retention-days: 7
 
   self-check:
     name: secguard checks itself
@@ -50,21 +183,18 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-          cache: "pip"
 
       - name: Install
-        run: python -m pip install .
+        run: python -m pip install --disable-pip-version-check .
 
-      # The playbook review window is a promise this repository has to keep
-      # first. If secguard's own guidance goes stale, the build says so.
       - name: Check playbook freshness
         run: secguard playbooks check
 
@@ -80,50 +210,204 @@ jobs:
             --input tests/fixtures/detect-secrets-baseline.json \
             --fail-on none \
             --sarif secguard.sarif \
-            --markdown secguard-report.md
+            --markdown secguard-report.md \
+            --pr-comment secguard-comment.md
 
-      - name: Confirm no fixture canary reached the outputs
+      - name: Confirm fixture canaries were redacted from every output
         run: |
-          if grep -R -l "SECGUARD-CANARY" secguard.sarif secguard-report.md; then
-            echo "::error title=redaction::Fixture canary leaked into secguard output"
-            exit 1
-          fi
-          echo "outputs are clean"
+          python - <<'PY'
+          import json
+          from pathlib import Path
 
-  build:
-    name: Build distribution
+          for name in ("secguard.sarif", "secguard-report.md", "secguard-comment.md"):
+              text = Path(name).read_text(encoding="utf-8")
+              if "SECGUARD-CANARY" in text:
+                  raise SystemExit(f"fixture canary leaked into {name}")
+          if not json.loads(Path("secguard.sarif").read_text(encoding="utf-8"))["runs"][0]["results"]:
+              raise SystemExit("self-check produced no finding")
+          PY
+
+  action:
+    name: Composite Action / ${{ matrix.case }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - case: pass
+            report: ci-action/clean.json
+            waivers: ci-action/waivers.yaml
+            allow-missing: "false"
+            outcome: success
+            verdict: PASS
+            count: "1"
+            outputs: "true"
+          - case: block
+            report: ci-action/leaked.json
+            waivers: ci-action/waivers.yaml
+            allow-missing: "false"
+            outcome: failure
+            verdict: BLOCK
+            count: "1"
+            outputs: "true"
+          - case: invalid-report
+            report: ci-action/invalid.json
+            waivers: ci-action/waivers.yaml
+            allow-missing: "false"
+            outcome: failure
+            verdict: ERROR
+            count: "1"
+            outputs: "false"
+          - case: no-report
+            report: ci-action/absent.json
+            waivers: ci-action/waivers.yaml
+            allow-missing: "false"
+            outcome: failure
+            verdict: NO-REPORTS
+            count: "0"
+            outputs: "false"
+          - case: path-with-spaces
+            report: ci-action/scan results/clean.json
+            waivers: ci-action/waivers.yaml
+            allow-missing: "false"
+            outcome: success
+            verdict: PASS
+            count: "1"
+            outputs: "true"
+          - case: pre-gate-error
+            report: ci-action/clean.json
+            waivers: ci-action/invalid-waivers.yaml
+            allow-missing: "false"
+            outcome: failure
+            verdict: ERROR
+            count: ""
+            outputs: "false"
+          - case: explicitly-allow-missing
+            report: ci-action/absent.json
+            waivers: ci-action/waivers.yaml
+            allow-missing: "true"
+            outcome: success
+            verdict: NO-REPORTS
+            count: "0"
+            outputs: "false"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Build
+      - name: Prepare Action cases
         run: |
-          python -m pip install build
-          python -m build
+          python3 - <<'PY'
+          import shutil
+          from pathlib import Path
 
-      # Packaged data is easy to break and invisible until a user installs the
-      # wheel, so install from the artifact and exercise the packaged resources.
-      - name: Verify packaged resources survive the wheel
-        run: |
-          python -m venv /tmp/verify
-          /tmp/verify/bin/python -m pip install --quiet dist/*.whl
-          cd /tmp
-          /tmp/verify/bin/secguard playbooks list
-          /tmp/verify/bin/secguard incident start --secret-type gcp-service-account-json > /dev/null
-          /tmp/verify/bin/secguard init /tmp/scaffold-check --ci both
+          root = Path("ci-action")
+          (root / "scan results").mkdir(parents=True)
+          (root / "clean.json").write_text("[]", encoding="utf-8")
+          (root / "scan results/clean.json").write_text("[]", encoding="utf-8")
+          (root / "invalid.json").write_text("{", encoding="utf-8")
+          (root / "invalid-waivers.yaml").write_text("{", encoding="utf-8")
+          shutil.copyfile("tests/fixtures/gitleaks-report.json", root / "leaked.json")
+          shutil.copyfile("src/secguard/templates/waivers.yaml", root / "waivers.yaml")
+          PY
 
-      - name: Upload distribution
-        uses: actions/upload-artifact@v4
+      - name: Run the composite Action
+        id: gate
+        uses: ./
+        continue-on-error: true
         with:
-          name: dist
-          path: dist/
+          reports: ${{ matrix.report }}
+          waivers: ${{ matrix.waivers }}
+          allow-missing-reports: ${{ matrix.allow-missing }}
+          sarif-output: ci-action/result.sarif
+          markdown-output: ci-action/result.md
+          comment-output: ci-action/comment.md
+
+      - name: Assert Action outcome, outputs, and redaction
+        if: always()
+        env:
+          EXPECTED_OUTCOME: ${{ matrix.outcome }}
+          EXPECTED_VERDICT: ${{ matrix.verdict }}
+          EXPECTED_COUNT: ${{ matrix.count }}
+          EXPECTED_FILES: ${{ matrix.outputs }}
+          ACTUAL_OUTCOME: ${{ steps.gate.outcome }}
+          ACTUAL_VERDICT: ${{ steps.gate.outputs.verdict }}
+          ACTUAL_COUNT: ${{ steps.gate.outputs.reports-found }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          for key in ("OUTCOME", "VERDICT", "COUNT"):
+              actual, expected = os.environ[f"ACTUAL_{key}"], os.environ[f"EXPECTED_{key}"]
+              if actual != expected:
+                  raise SystemExit(f"Action {key}: {actual!r}, expected {expected!r}")
+          expected_files = os.environ["EXPECTED_FILES"] == "true"
+          for name in ("ci-action/result.sarif", "ci-action/result.md", "ci-action/comment.md"):
+              path = Path(name)
+              if path.is_file() != expected_files:
+                  raise SystemExit(f"unexpected output presence: {name}")
+              if expected_files and "SECGUARD-CANARY" in path.read_text(encoding="utf-8"):
+                  raise SystemExit(f"fixture canary leaked into {name}")
+          PY
+
+  provenance:
+    name: Attest trusted main build
+    needs: [build, test, security, self-check, action]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download the verified release assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-assets
+          path: dist
+
+      - name: Attest build provenance
+        id: attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
+
+      - name: Upload provenance bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-provenance
+          path: ${{ steps.attest.outputs.bundle-path }}
+          if-no-files-found: error
           retention-days: 7
+
+  release-checks:
+    name: Release checks
+    if: always()
+    needs: [build, test, security, self-check, action, provenance]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every release check to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          results = json.loads(os.environ["RESULTS"])
+          for job in ("build", "test", "security", "self-check", "action"):
+              if results[job]["result"] != "success":
+                  raise SystemExit(f"{job} did not pass: {results[job]['result']}")
+          trusted_push = os.environ["EVENT_NAME"] == "push" and os.environ["REF"] == "refs/heads/main"
+          expected = "success" if trusted_push else "skipped"
+          if results["provenance"]["result"] != expected:
+              raise SystemExit(f"provenance: {results['provenance']['result']}, expected {expected}")
+          print("Release checks passed")
+          PY

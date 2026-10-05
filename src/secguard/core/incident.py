@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import date
 
 from secguard.core.playbooks import Playbook
-from secguard.core.redaction import sanitize_text
+from secguard.core.redaction import markdown_code_span, sanitize_text
 
 EVIDENCE_RULE = (
     "Record the provider, rule id, redacted fingerprint, file path, commit hash, and "
@@ -36,7 +36,10 @@ def render_incident(
         "",
         "## Exposure record",
         "",
-        f"- Secret type: `{secret_type}`",
+        # `--playbook` lets a caller supply any `--secret-type` string, and this
+        # checklist becomes an incident record, so it gets the same hygiene as
+        # every other value a human passes in.
+        f"- Secret type: {markdown_code_span(secret_type)}",
         f"- Playbook: `{playbook.slug}` (vetted {playbook.vetted.isoformat()})",
         f"- Opened: {opened_on.isoformat()}",
     ]
@@ -72,7 +75,8 @@ def render_incident(
             "",
             "- [ ] Credential confirmed invalid at the provider.",
             "- [ ] Replacement credential stored in the approved secret manager.",
-            "- [ ] Provider logs reviewed for the full exposure window.",
+            "- [ ] Provider logs reviewed for the available exposure window; "
+            "coverage gaps recorded.",
             "- [ ] Owner, AppSec, and affected service teams notified.",
             "- [ ] Detection or waiver added so the same match does not recur silently.",
             "- [ ] Residual risk written down with an owner and a review date.",

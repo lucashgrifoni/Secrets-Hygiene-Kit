@@ -8,6 +8,7 @@ lifecycle fails closed.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -15,11 +16,18 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from secguard.core.matching import path_matches, rule_matches
+from secguard.core.matching import (
+    PatternTooComplex,
+    assert_pattern_is_simple,
+    path_matches,
+    rule_matches,
+)
+from secguard.core.redaction import has_control_characters, validation_error_details
+from secguard.core.writing import UnsafeWriteError, assert_writable
 
 SCHEMA_VERSION = "secguard.waiver/v1"
 WAIVER_ID_PREFIX = "WV-"
-SECRET_TYPE_PREFIX = "secret-type:"
+TYPE_SCOPE_PREFIX = "secret-type:"
 
 EMPTY_FIELD_MESSAGE = "field cannot be empty"
 
@@ -84,24 +92,63 @@ class Waiver(BaseModel):
             raise ValueError("waiver id must include a year and sequence")
         return value
 
-    @field_validator("rule", "path", "reason", "owner", "approver")
+    @field_validator("rule")
+    @classmethod
+    def validate_rule_pattern(cls, value: str) -> str:
+        """Bound the rule pattern for the same reason the path pattern is bounded."""
+        try:
+            assert_pattern_is_simple(value, field="waiver rule")
+        except PatternTooComplex as exc:
+            raise ValueError(str(exc)) from exc
+        return value
+
+    @field_validator("id", "rule", "path", "reason", "owner", "approver")
     @classmethod
     def validate_required_text(cls, value: str) -> str:
-        """Reject empty required text fields after whitespace trimming."""
+        """Reject empty required text fields, and any that could forge output.
+
+        A waiver is written by a human but read by CI, and every one of these
+        fields is printed on the gate summary, in the Markdown report, and in
+        the pull-request comment. A newline in an owner or a reason would let a
+        waiver file fake a verdict line in secguard's own output, which is the
+        same attack a scanner report was already stopped from running.
+        """
         if not value:
             raise ValueError(EMPTY_FIELD_MESSAGE)
+        if has_control_characters(value):
+            raise ValueError("field cannot contain control characters, newlines, or escapes")
         return value
 
     @field_validator("path")
     @classmethod
     def validate_scope_path(cls, value: str) -> str:
-        """Keep waiver scope inside the repository so it cannot silently match nothing."""
+        """Keep waiver scope inside the repository, normalized the way findings are.
+
+        Finding paths collapse `./a/b`, `a//b` and `a/b/` to `a/b`. A waiver
+        scope that kept its original spelling would be compared literally
+        against the collapsed form and match nothing, so the exception would be
+        silently dead — the worst failure mode for a security exception, because
+        the file still looks reviewed.
+        """
         normalized = value.replace("\\", "/")
         if normalized.startswith("/") or ":" in normalized.split("/")[0]:
             raise ValueError("path must be repository-relative")
         if ".." in normalized.split("/"):
             raise ValueError("path cannot contain parent traversal")
-        return normalized
+
+        # A glob is not a path, so PurePosixPath is the wrong tool: it would
+        # eat a trailing `**`. Collapse only the parts that are unambiguous.
+        segments = [segment for segment in normalized.split("/") if segment not in ("", ".")]
+        collapsed = "/".join(segments)
+        if not collapsed:
+            raise ValueError("path cannot be empty")
+
+        try:
+            assert_pattern_is_simple(collapsed, field="waiver path")
+        except PatternTooComplex as exc:
+            raise ValueError(str(exc)) from exc
+
+        return collapsed
 
     @field_validator("expires_at", mode="before")
     @classmethod
@@ -120,15 +167,25 @@ class Waiver(BaseModel):
         """Return whether the waiver is expired for a given date."""
         return self.expires_at < today
 
-    def covers(self, *, rule: str, secret_type: str, path: str) -> bool:
-        """Return whether this waiver's scope covers a finding, ignoring expiry."""
+    def covers(self, *, rules: Sequence[str], secret_type: str, path: str) -> bool:
+        """Return whether this waiver's scope covers a finding, ignoring expiry.
+
+        ``rules`` carries every scanner-qualified rule that contributed to the
+        finding, because merging collapses the same leak reported by several
+        detectors into one record. A detector-scoped waiver must cover all of
+        them. Covering only some would let an exception written for one
+        scanner's match suppress another scanner's independent detection at the
+        same location — so adding a detector would weaken the gate instead of
+        strengthening it. A ``secret-type:`` waiver is unaffected: the canonical
+        secret type is what the merge keys on, so it is shared by construction.
+        """
         if not path_matches(self.path, path):
             return False
 
-        if self.rule.startswith(SECRET_TYPE_PREFIX):
-            return rule_matches(self.rule[len(SECRET_TYPE_PREFIX) :].strip(), secret_type)
+        if self.rule.startswith(TYPE_SCOPE_PREFIX):
+            return rule_matches(self.rule[len(TYPE_SCOPE_PREFIX) :].strip(), secret_type)
 
-        return rule_matches(self.rule, rule)
+        return bool(rules) and all(rule_matches(self.rule, rule) for rule in rules)
 
 
 class WaiverDocument(BaseModel):
@@ -160,14 +217,40 @@ class WaiverDocument(BaseModel):
         """Return waivers that are expired for a given date."""
         return [waiver for waiver in self.waivers if waiver.is_expired(today)]
 
-    def match(self, *, rule: str, secret_type: str, path: str, today: date) -> Waiver | None:
-        """Return the first active waiver covering a finding, or None."""
-        for waiver in self.waivers:
-            if waiver.is_expired(today):
-                continue
-            if waiver.covers(rule=rule, secret_type=secret_type, path=path):
-                return waiver
-        return None
+    def match(
+        self, *, rules: Sequence[str], secret_type: str, path: str, today: date
+    ) -> tuple[Waiver, ...]:
+        """Return the active waivers that together cover a finding, or nothing.
+
+        One waiver covering every contributing rule is the normal case and is
+        returned alone, so attribution stays simple. Failing that, waivers
+        stack: a team that reviewed the gitleaks match and the trufflehog match
+        separately, and wrote a waiver for each, has approved the whole finding.
+        Refusing that would mean the only way to waive a merged finding is a
+        `secret-type:` waiver broad enough to cover detectors nobody reviewed.
+
+        Coverage must still be total. A partially covered finding stays active,
+        because the rules nobody waived are exactly the evidence nobody looked at.
+        """
+        active = [waiver for waiver in self.waivers if not waiver.is_expired(today)]
+
+        for waiver in active:
+            if waiver.covers(rules=rules, secret_type=secret_type, path=path):
+                return (waiver,)
+
+        chosen: list[Waiver] = []
+        uncovered = set(rules)
+        for waiver in active:
+            covered = {
+                rule
+                for rule in uncovered
+                if waiver.covers(rules=(rule,), secret_type=secret_type, path=path)
+            }
+            if covered:
+                chosen.append(waiver)
+                uncovered -= covered
+
+        return () if uncovered else tuple(chosen)
 
     def next_id(self, today: date) -> str:
         """Return the next sequential waiver id for the current year."""
@@ -187,10 +270,19 @@ def load_waiver_file(path: Path) -> WaiverDocument:
     if not path.is_file():
         raise WaiverFileNotFound(f"waiver path is not a file: {path}")
 
+    # PyYAML resolves `2026-02-30` to a date before secguard sees it and raises
+    # a bare ValueError, not a YAMLError. Letting that escape turned a typo in a
+    # waiver date into a traceback and exit 1, which reads as "the gate blocked"
+    # rather than "fix your file".
     try:
         content = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except yaml.YAMLError as exc:
-        raise WaiverParseError(f"invalid YAML in waiver file: {path}") from exc
+    except (yaml.YAMLError, ValueError, RecursionError) as exc:
+        raise WaiverParseError(
+            f"cannot parse waiver file {path}: the YAML is malformed or holds a value "
+            "no date can represent, such as 2026-02-30"
+        ) from exc
+    except OSError as exc:
+        raise WaiverParseError(f"cannot read waiver file {path}: {exc.strerror}") from exc
 
     if content is None:
         content = {}
@@ -247,10 +339,7 @@ def add_waiver(
             approver=approver,
         )
     except ValidationError as exc:
-        details = "; ".join(
-            f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
-            for error in exc.errors(include_input=False)
-        )
+        details = validation_error_details(exc.errors(include_input=False))
         raise WaiverPolicyError(f"invalid waiver: {details}") from exc
 
     updated = new_waiver_document([*document.waivers, waiver])
@@ -263,14 +352,22 @@ def add_waiver(
 
 def write_waiver_file(path: Path, document: WaiverDocument) -> None:
     """Write a waiver document with the standard header, creating parent directories."""
+    try:
+        assert_writable(path)
+    except UnsafeWriteError as exc:
+        raise WaiverPolicyError(str(exc)) from exc
+
     payload = {
         "schema": document.schema_version,
         "waivers": [waiver.model_dump(mode="python") for waiver in document.waivers],
     }
     body = yaml.safe_dump(payload, sort_keys=False, allow_unicode=True, default_flow_style=False)
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f"{WAIVER_FILE_HEADER}\n{body}", encoding="utf-8", newline="\n")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{WAIVER_FILE_HEADER}\n{body}", encoding="utf-8", newline="\n")
+    except OSError as exc:
+        raise WaiverPolicyError(f"cannot write waiver file {path}: {exc.strerror}") from exc
 
 
 def _validate_expiry_policy(expires_at: date, today: date) -> list[str]:
@@ -297,9 +394,6 @@ def _validate_expiry_policy(expires_at: date, today: date) -> list[str]:
 
 def _format_validation_error(path: Path, exc: ValidationError) -> str:
     """Format Pydantic errors without echoing raw field input values."""
-    details: list[str] = []
-    for error in exc.errors(include_input=False):
-        location = ".".join(str(part) for part in error["loc"])
-        details.append(f"{location}: {error['msg']}")
-
-    return f"invalid waiver file {path}: {'; '.join(details)}"
+    return (
+        f"invalid waiver file {path}: {validation_error_details(exc.errors(include_input=False))}"
+    )

@@ -13,7 +13,7 @@ from conftest import (
     TRUFFLEHOG_REPORT,
 )
 
-from secguard.core.detectors import detect_format, load_report, load_reports
+from secguard.core.detectors import detect_format, is_empty_report, load_report, load_reports
 from secguard.core.findings import FindingFileNotFound, FindingParseError
 
 
@@ -55,12 +55,45 @@ def test_unrecognized_payload_names_the_supported_formats(tmp_path):
         load_report(report)
 
 
-def test_empty_report_file_is_rejected(tmp_path):
-    report = tmp_path / "report.json"
-    report.write_text("   \n", encoding="utf-8")
+def test_an_empty_report_is_a_clean_scan_not_an_error(tmp_path):
+    """Zero findings is what a clean trufflehog run writes: JSON Lines with no lines.
 
+    Rejecting it would fail the gate on exactly the repositories that have
+    nothing to report, while the equivalent clean gitleaks (`[]`) and
+    detect-secrets (empty `results`) reports pass.
+    """
+    for body in ("", "   \n", "\r\n\t "):
+        report = tmp_path / "report.json"
+        report.write_text(body, encoding="utf-8")
+
+        assert load_report(report).findings == []
+
+
+def test_an_empty_report_is_still_flagged_to_the_caller(tmp_path):
+    """A detector that crashed leaves the same file behind, so it must stay visible."""
+    empty = tmp_path / "empty.jsonl"
+    empty.write_text("", encoding="utf-8")
+    clean = tmp_path / "clean.json"
+    clean.write_text("[]", encoding="utf-8")
+
+    assert is_empty_report(empty) is True
+    assert is_empty_report(clean) is False
+
+
+def test_a_file_that_cannot_be_read_is_not_reported_as_empty(tmp_path):
+    """Otherwise one missing path produced two contradictory messages.
+
+    "is empty; treating it as zero findings" followed by "finding file not
+    found" leaves the operator unsure which one the gate acted on.
+    """
+    assert is_empty_report(tmp_path / "absent.json") is False
+    assert is_empty_report(tmp_path) is False  # a directory is not an empty report
+
+
+def test_format_inference_still_refuses_to_guess_from_nothing():
+    """`detect_format` has no structure to read; only `load_report` knows it means clean."""
     with pytest.raises(FindingParseError, match="report file is empty"):
-        load_report(report)
+        detect_format("   \n", source="report.json")
 
 
 def test_missing_report_file_is_reported(tmp_path):
@@ -259,3 +292,103 @@ def test_merge_is_deterministic(catalog):
 def test_load_reports_requires_at_least_one_input():
     with pytest.raises(FindingParseError, match="at least one scanner report"):
         load_reports([])
+
+
+# ------------------------------------------------- hostile and malformed input
+
+
+def _gitleaks_file(tmp_path, entries) -> object:
+    report = tmp_path / "gitleaks.json"
+    report.write_text(json.dumps(entries), encoding="utf-8")
+    return report
+
+
+def test_an_unusable_line_number_degrades_to_no_position(tmp_path):
+    """`1e999` parses as JSON infinity; int() of it raises OverflowError.
+
+    A malformed coordinate must cost the position, not crash the gate: the
+    finding is still reported, and the exit code still means what it says.
+    """
+    report = _gitleaks_file(
+        tmp_path, [{"RuleID": "aws-access-token", "File": "a.py", "StartLine": 1e999}]
+    )
+
+    finding = load_report(report).findings[0]
+
+    assert finding.line is None
+    assert finding.path == "a.py"
+
+
+def test_a_line_number_beyond_any_real_file_is_ignored(tmp_path):
+    """SARIF consumers cannot represent an arbitrary-precision integer."""
+    report = _gitleaks_file(
+        tmp_path, [{"RuleID": "aws-access-token", "File": "a.py", "StartLine": 2**63}]
+    )
+
+    assert load_report(report).findings[0].line is None
+
+
+def test_a_newline_in_a_scanner_path_is_rejected_not_printed(tmp_path):
+    """A path carrying a newline can forge a gate verdict in CI output.
+
+    The console prints one line per finding, so a path containing
+    `\nPASS: no blocking finding...` would put a fake verdict in the log of a
+    run that actually blocked.
+    """
+    forged = "a.py\nPASS: no blocking finding and no expired waiver.\n0 finding(s): forged"
+    report = _gitleaks_file(
+        tmp_path, [{"RuleID": "aws-access-token", "File": forged, "StartLine": 1}]
+    )
+
+    with pytest.raises(FindingParseError, match="control characters") as error:
+        load_report(report)
+
+    assert "\n" not in str(error.value)
+
+
+def test_an_escape_sequence_in_a_rule_id_is_rejected(tmp_path):
+    """A rule id is printed on the summary and matched against waiver patterns."""
+    report = _gitleaks_file(
+        tmp_path,
+        [{"RuleID": "aws\x1b[2K\rfake", "File": "a.py", "StartLine": 1}],
+    )
+
+    with pytest.raises(FindingParseError, match="control characters"):
+        load_report(report)
+
+
+def test_equivalent_paths_normalize_so_the_merge_and_waivers_see_one_file(tmp_path):
+    """`./app/x.py` and `app/x.py` are the same file to git and to a reviewer.
+
+    Leaving them distinct split one leak into two findings and let a waiver
+    scoped to `app/x.py` miss the copy the other detector reported.
+    """
+    dotted = _gitleaks_file(
+        tmp_path, [{"RuleID": "aws-access-token", "File": ".//app/./x.py", "StartLine": 5}]
+    )
+    plain = tmp_path / "trufflehog.jsonl"
+    plain.write_text(
+        json.dumps(
+            {
+                "DetectorName": "AWS",
+                "SourceMetadata": {"Data": {"Git": {"file": "app/x.py", "line": 5}}},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    document = load_reports([dotted, plain])
+
+    assert len(document.findings) == 1
+    assert document.findings[0].path == "app/x.py"
+    assert document.findings[0].corroborated_by == ["trufflehog"]
+
+
+def test_a_path_that_normalizes_to_nothing_is_rejected(tmp_path):
+    report = _gitleaks_file(
+        tmp_path, [{"RuleID": "aws-access-token", "File": "./", "StartLine": 1}]
+    )
+
+    with pytest.raises(FindingParseError, match="unusable file path"):
+        load_report(report)

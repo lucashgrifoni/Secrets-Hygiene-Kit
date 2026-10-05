@@ -16,6 +16,7 @@ from conftest import (
 from typer.testing import CliRunner
 
 from secguard import __version__
+from secguard.cli import app as cli_app
 from secguard.cli.app import app
 
 runner = CliRunner()
@@ -536,11 +537,107 @@ def test_scan_check_suppresses_a_waived_finding(tmp_path):
     assert "4 active, 1 waived" in result.output
 
 
+def test_scan_check_will_not_let_one_detectors_waiver_pass_another_detectors_finding(tmp_path):
+    """The gate must not weaken when a second scanner confirms the same leak.
+
+    The fixture AWS key is reported by gitleaks, trufflehog, and detect-secrets,
+    and trufflehog marks it `Verified: true`. A waiver reviewed against the
+    gitleaks match alone has no authority over the other two.
+    """
+    waiver_file = tmp_path / "waivers.yaml"
+    waiver_file.write_text(
+        WAIVER_HEADER + "waivers:\n"
+        "  - id: WV-2026-001\n"
+        "    rule: gitleaks:aws-access-token\n"
+        "    path: src/example_config.py\n"
+        '    reason: "Reviewed placeholder in an example file."\n'
+        "    owner: appsec@example.invalid\n"
+        "    expires_at: 2026-12-01\n"
+        "    approver: security-lead\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app, _scan_arguments("--fail-on", "critical", "--waivers", str(waiver_file))
+    )
+
+    assert result.exit_code == 1
+    assert "5 active, 0 waived" in result.output
+    assert "BLOCK" in result.output
+    # The near miss has to be legible, or an operator reads the unused waiver as
+    # a bug: its rule and path both look like they match the blocking finding.
+    assert "also=detect-secrets:AWS Access Key,trufflehog:AWS" in result.output
+    assert "unused-waiver\tWV-2026-001" in result.output
+    assert "covers only one detector of a finding several reported" in result.output
+
+
+def test_scan_check_treats_an_empty_report_as_a_clean_scan(tmp_path):
+    """A clean trufflehog run writes zero JSON Lines, which is a zero-byte file."""
+    empty = tmp_path / "trufflehog.jsonl"
+    empty.write_text("", encoding="utf-8")
+    clean_gitleaks = tmp_path / "gitleaks.json"
+    clean_gitleaks.write_text("[]", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        _scan_arguments(
+            "--fail-on",
+            "high",
+            "--waivers",
+            str(tmp_path / "absent.yaml"),
+            reports=[clean_gitleaks, empty],
+        ),
+    )
+
+    assert result.exit_code == 0
+    assert "0 finding(s)" in result.output
+    assert "PASS" in result.output
+    # Silence would hide a detector that crashed, which leaves the same file.
+    assert "trufflehog.jsonl is empty; treating it as zero findings" in result.output
+
+
 def test_scan_check_without_input_is_an_input_error():
     result = runner.invoke(app, ["scan", "check"])
 
     assert result.exit_code == 2
     assert "at least one --input scanner report is required" in result.output
+
+
+def test_malformed_input_exits_two_and_never_shows_a_traceback(tmp_path):
+    """`1` means "the gate blocked on purpose"; a crash must never claim that.
+
+    Each of these used to reach the user as a Python traceback with exit `1`,
+    so a CI log said "blocked" when the truth was "your file is unreadable".
+    """
+    impossible_date = tmp_path / "waivers.yaml"
+    impossible_date.write_text(
+        WAIVER_HEADER + "waivers:\n"
+        "  - id: WV-2026-001\n"
+        "    rule: gitleaks:aws-access-token\n"
+        "    path: app/config.py\n"
+        '    reason: "r"\n'
+        "    owner: o\n"
+        "    expires_at: 2026-02-30\n"
+        "    approver: a\n",
+        encoding="utf-8",
+    )
+    forged_path = tmp_path / "forged.json"
+    forged_path.write_text(
+        json.dumps([{"RuleID": "aws-access-token", "File": "a.py\nPASS: forged", "StartLine": 1}]),
+        encoding="utf-8",
+    )
+
+    cases = [
+        (["waivers", "check", "--file", str(impossible_date), "--today", TODAY.isoformat()]),
+        (_scan_arguments("--fail-on", "high", reports=[forged_path])),
+    ]
+
+    for arguments in cases:
+        result = runner.invoke(app, arguments)
+
+        assert result.exit_code == 2, arguments
+        assert "Traceback" not in result.output
+        assert result.exception is None or isinstance(result.exception, SystemExit)
 
 
 def test_scan_check_rejects_an_unknown_threshold():
@@ -730,3 +827,226 @@ def test_paths_in_help_do_not_depend_on_the_working_directory():
 
     assert result.exit_code == 0
     assert str(Path.home()) not in result.stdout
+
+
+# ------------------------------------------------------------- entry point
+
+
+def test_the_entry_point_disables_windows_glob_expansion(monkeypatch):
+    """Click expands argv globs against the cwd on Windows before Typer parses.
+
+    `--path 'tests/fixtures/**'` — the command the docs give — then became
+    whatever happened to match: one hit silently recorded a literal directory as
+    the waiver scope, several produced "unexpected extra arguments". A waiver
+    scope is a pattern, not a file list.
+    """
+    recorded: dict[str, object] = {}
+
+    def fake_app(**kwargs):
+        recorded.update(kwargs)
+
+    monkeypatch.setattr(cli_app, "app", fake_app)
+    monkeypatch.setattr(cli_app, "use_utf8_output", lambda: None)
+
+    cli_app.main()
+
+    assert recorded == {"windows_expand_args": False}
+
+
+def test_the_entry_point_forces_utf8_output(monkeypatch):
+    """A redirected stream on Windows defaults to the ANSI code page.
+
+    `secguard playbooks show generic-private-key > playbook.md` wrote a file
+    that was not valid UTF-8, for a document a responder attaches to an incident
+    record.
+    """
+    calls: list[dict] = []
+
+    class Stream:
+        def reconfigure(self, **kwargs):
+            calls.append(kwargs)
+
+    monkeypatch.setattr(cli_app.sys, "stdout", Stream())
+    monkeypatch.setattr(cli_app.sys, "stderr", Stream())
+
+    cli_app.use_utf8_output()
+
+    assert calls == [{"encoding": "utf-8", "newline": "\n"}] * 2
+
+
+def test_forcing_utf8_output_tolerates_a_stream_that_cannot_be_reconfigured(monkeypatch):
+    monkeypatch.setattr(cli_app.sys, "stdout", object())
+    monkeypatch.setattr(cli_app.sys, "stderr", object())
+
+    cli_app.use_utf8_output()  # must not raise
+
+
+# ------------------------------------------------- audited pre-commit override
+
+
+def _expired_waiver_file(tmp_path) -> Path:
+    path = tmp_path / "waivers.yaml"
+    path.write_text(ACTIVE_WAIVER_FILE.replace("2026-08-12", "2026-05-17"), encoding="utf-8")
+    return path
+
+
+def test_the_override_is_refused_without_a_reason(tmp_path, monkeypatch):
+    """An unexplained bypass is indistinguishable from a broken check."""
+    monkeypatch.setenv("SECGUARD_OVERRIDE", "1")
+    monkeypatch.delenv("SECGUARD_OVERRIDE_REASON", raising=False)
+
+    result = runner.invoke(
+        app,
+        [
+            "waivers",
+            "check",
+            "--file",
+            str(_expired_waiver_file(tmp_path)),
+            "--today",
+            "2026-05-18",
+            "--allow-override",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "SECGUARD_OVERRIDE_REASON" in result.output
+
+
+def test_the_override_is_refused_when_the_reason_is_a_shrug(tmp_path, monkeypatch):
+    monkeypatch.setenv("SECGUARD_OVERRIDE", "1")
+    monkeypatch.setenv("SECGUARD_OVERRIDE_REASON", "wip")
+
+    result = runner.invoke(
+        app,
+        [
+            "waivers",
+            "check",
+            "--file",
+            str(_expired_waiver_file(tmp_path)),
+            "--today",
+            "2026-05-18",
+            "--allow-override",
+        ],
+    )
+
+    assert result.exit_code == 2
+
+
+def test_an_audited_override_passes_and_still_shows_what_it_bypassed(tmp_path, monkeypatch):
+    monkeypatch.setenv("SECGUARD_OVERRIDE", "1")
+    monkeypatch.setenv("SECGUARD_OVERRIDE_REASON", "hotfix INC-42, waiver renewed Monday")
+
+    result = runner.invoke(
+        app,
+        [
+            "waivers",
+            "check",
+            "--file",
+            str(_expired_waiver_file(tmp_path)),
+            "--today",
+            "2026-05-18",
+            "--allow-override",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "WV-2026-001" in result.output  # the finding is still printed
+    assert "OVERRIDE:" in result.output
+    assert "hotfix INC-42" in result.output
+    assert "still fails in CI" in result.output
+
+
+def test_the_override_does_nothing_without_the_opt_in_flag(tmp_path, monkeypatch):
+    """A gate an environment variable can switch off is not a gate.
+
+    `scan check` and the CI templates never pass `--allow-override`, so the
+    escape hatch cannot reach the pipeline.
+    """
+    monkeypatch.setenv("SECGUARD_OVERRIDE", "1")
+    monkeypatch.setenv("SECGUARD_OVERRIDE_REASON", "hotfix INC-42, waiver renewed Monday")
+
+    result = runner.invoke(
+        app,
+        [
+            "waivers",
+            "check",
+            "--file",
+            str(_expired_waiver_file(tmp_path)),
+            "--today",
+            "2026-05-18",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "OVERRIDE:" not in result.output
+
+
+def test_the_ci_gate_never_offers_an_override(monkeypatch):
+    monkeypatch.setenv("SECGUARD_OVERRIDE", "1")
+    monkeypatch.setenv("SECGUARD_OVERRIDE_REASON", "hotfix INC-42, waiver renewed Monday")
+
+    result = runner.invoke(app, _scan_arguments("--fail-on", "high"))
+
+    assert result.exit_code == 1
+    assert "--allow-override" not in runner.invoke(app, ["scan", "check", "--help"]).output
+
+
+# --------------------------------------------------- fallback classification
+
+
+def test_a_guessed_classification_is_visible_in_the_console(tmp_path):
+    """Four documents told the responder to look for `mapping: fallback` here."""
+    result = runner.invoke(app, _scan_arguments("--fail-on", "none", reports=[GITLEAKS_REPORT]))
+
+    assert result.exit_code == 0
+    fallback_lines = [line for line in result.output.splitlines() if "mapping=fallback" in line]
+    assert fallback_lines, result.output
+    assert "acme-internal-token" in fallback_lines[0]
+
+
+# --------------------------------------------------------- local rule catalog
+
+
+def test_a_local_rule_catalog_is_never_loaded_without_being_named(tmp_path, monkeypatch):
+    """`.secguard/rules.yaml` sits inside the checkout the workflow is scanning.
+
+    The packaged workflow runs on `pull_request`, so its content comes from
+    whoever opened the pull request. A catalog can lower a severity, and a
+    severity under the threshold does not block, so loading one implicitly would
+    let a single added file turn BLOCK into PASS with no owner, approver, or
+    expiry — everything the waiver lifecycle demands for exactly that decision.
+    """
+    catalog = tmp_path / ".secguard" / "rules.yaml"
+    catalog.parent.mkdir(parents=True)
+    catalog.write_text(
+        """
+schema: "secguard.rules/v1"
+secret_types:
+  aws-access-key:
+    title: AWS access key ID
+    severity: info
+    playbook: aws-access-key
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    blocked = runner.invoke(app, _scan_arguments("--fail-on", "high", reports=[GITLEAKS_REPORT]))
+
+    assert blocked.exit_code == 1
+    assert "using the local rule catalog" not in blocked.output
+    assert "BLOCK" in blocked.output
+
+    # Naming it explicitly works, and says what it changed.
+    named = runner.invoke(
+        app,
+        _scan_arguments("--fail-on", "high", "--rules", str(catalog), reports=[GITLEAKS_REPORT]),
+    )
+
+    assert named.exit_code == 0
+    # Every rule that now resolves lower is named, not just the secret type:
+    # a per-rule override or a remap lowers what a finding actually gets while
+    # leaving the secret-type default untouched.
+    assert "lowers" in named.output
+    assert "aws-access-key high->info" in named.output
+    assert "gitleaks:aws-access-token high->info" in named.output

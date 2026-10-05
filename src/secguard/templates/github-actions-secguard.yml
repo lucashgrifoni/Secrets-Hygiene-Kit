@@ -15,18 +15,20 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: "pip"
 
+      # Install the GitHub release revision reviewed by your team. This uses
+      # Git and the configured Python package index for dependencies.
       - name: Install secguard
-        run: python -m pip install secrets-hygiene-kit
+        run: python -m pip install "git+https://github.com/lucashgrifoni/secrets-hygiene-kit@v0.3.0"
 
       - name: Check waiver lifecycle
         run: secguard waivers check --file .secguard/waivers.yaml
@@ -35,42 +37,45 @@ jobs:
         run: secguard playbooks check
 
       # Detection step. secguard reads reports and never runs a scanner, so add
-      # the detector your team already trusts and pin it by commit SHA. Let the
-      # detector exit non-zero without failing the job: the secguard gate below
-      # is what decides block or pass.
+      # the detector your team already trusts and pin it by commit SHA. Keep
+      # scan errors fatal. Gitleaks --exit-code 0 delegates findings to secguard;
+      # TruffleHog should use --fail-on-scan-errors without --fail.
       #
       # - name: Run gitleaks
       #   run: |
-      #     gitleaks detect --no-banner --redact \
-      #       --report-format json --report-path gitleaks.json || true
+      #     gitleaks git --no-banner --redact --exit-code 0 \
+      #       --report-format json --report-path gitleaks.json
 
+      # This step deliberately has no `if:` guard. Skipping the gate when no
+      # report is present would make a pipeline with the detector step still
+      # commented out report a green secret-hygiene check that scanned nothing.
+      # Enable a detector above, or delete this job.
       - name: Secret hygiene gate
-        if: hashFiles('gitleaks.json', 'trufflehog.jsonl', '.secrets.baseline') != ''
         run: |
-          args=""
+          args=()
           for report in gitleaks.json trufflehog.jsonl .secrets.baseline; do
             if [ -f "$report" ]; then
-              args="$args --input $report"
+              args+=(--input "$report")
             fi
           done
-          secguard scan check $args \
+          if [ ${#args[@]} -eq 0 ]; then
+            echo "::error title=secguard::No scanner report was found, so nothing was gated."
+            echo "Uncomment a detector step above so it writes gitleaks.json,"
+            echo "trufflehog.jsonl, or .secrets.baseline before this step runs."
+            exit 1
+          fi
+          secguard scan check "${args[@]}" \
             --waivers .secguard/waivers.yaml \
             --fail-on high \
             --sarif secguard.sarif \
             --pr-comment secguard-comment.md
 
-      # Publishing to code scanning needs `security-events: write` on this job
-      # and an action pinned by commit SHA.
-      #
-      # - name: Upload SARIF
-      #   if: always() && hashFiles('secguard.sarif') != ''
-      #   uses: github/codeql-action/upload-sarif@<pin-a-reviewed-sha>
-      #   with:
-      #     sarif_file: secguard.sarif
+      # To publish SARIF to code scanning, add a reviewed upload step pinned
+      # by commit SHA and grant security-events: write to that job.
 
       - name: Upload secguard evidence
         if: always() && hashFiles('secguard.sarif') != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: secguard-evidence
           path: |

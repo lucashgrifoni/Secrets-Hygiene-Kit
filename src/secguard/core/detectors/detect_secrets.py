@@ -45,8 +45,6 @@ def parse_report(text: str, *, source: str, catalog: RuleCatalog) -> FindingDocu
         raise FindingParseError(f"{source}: detect-secrets baselines must be a JSON object")
 
     results = content.get("results")
-    if results is None:
-        return FindingDocument()
     if not isinstance(results, dict):
         raise FindingParseError(f"{source}: detect-secrets `results` must be a JSON object")
 

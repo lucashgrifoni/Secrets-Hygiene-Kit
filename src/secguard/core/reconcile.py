@@ -36,8 +36,13 @@ class ReconciledFinding:
 
     finding: Finding
     status: FindingStatus
-    waiver_id: str | None = None
+    waiver_ids: tuple[str, ...] = ()
     expired_waiver_id: str | None = None
+
+    @property
+    def waiver_id(self) -> str | None:
+        """The waivers that suppressed this finding, joined for display."""
+        return "+".join(self.waiver_ids) if self.waiver_ids else None
 
 
 @dataclass(frozen=True)
@@ -47,6 +52,7 @@ class ScanOutcome:
     results: list[ReconciledFinding]
     expired_waivers: list[Waiver] = field(default_factory=list)
     unused_waivers: list[Waiver] = field(default_factory=list)
+    narrowed_waivers: list[Waiver] = field(default_factory=list)
     fail_on: str = NO_THRESHOLD
     checked_on: date | None = None
 
@@ -120,17 +126,21 @@ def reconcile(
     results: list[ReconciledFinding] = []
 
     for finding in document.findings:
-        active_waiver = waivers.match(
-            rule=finding.rule,
+        covering = waivers.match(
+            rules=finding.rules,
             secret_type=finding.secret_type,
             path=finding.path,
             today=today,
         )
 
-        if active_waiver is not None:
-            used_waiver_ids.add(active_waiver.id)
+        if covering:
+            used_waiver_ids.update(waiver.id for waiver in covering)
             results.append(
-                ReconciledFinding(finding=finding, status="waived", waiver_id=active_waiver.id)
+                ReconciledFinding(
+                    finding=finding,
+                    status="waived",
+                    waiver_ids=tuple(waiver.id for waiver in covering),
+                )
             )
             continue
 
@@ -150,13 +160,49 @@ def reconcile(
         if waiver.id not in used_waiver_ids and waiver.id not in expired_ids
     ]
 
+    active_waivers = [waiver for waiver in waivers.waivers if waiver.id not in expired_ids]
+
     return ScanOutcome(
         results=results,
         expired_waivers=expired,
         unused_waivers=unused,
+        narrowed_waivers=_narrowed_waivers(active_waivers, results),
         fail_on=fail_on,
         checked_on=today,
     )
+
+
+def _narrowed_waivers(active: list[Waiver], results: list[ReconciledFinding]) -> list[Waiver]:
+    """Return active waivers that cover part of a still-active merged finding.
+
+    Without this, the near miss is invisible and reads like a bug: the waiver's
+    rule and path both look like they match the blocking finding, because the
+    console shows only the primary detection's rule. Naming it turns a confusing
+    "why is my waiver unused?" into a one-line answer.
+
+    Every active waiver is considered, not only the unused ones. A waiver that
+    suppresses one finding while falling short on another is exactly the case
+    where the operator has the least reason to suspect a scope problem.
+    """
+    # Only findings that are still blocking matter here. A near miss on a
+    # finding some other waiver already suppressed is not a problem to report.
+    merged = [
+        result.finding
+        for result in results
+        if result.status == "active" and len(result.finding.rules) > 1
+    ]
+    narrowed: list[Waiver] = []
+
+    for waiver in active:
+        for finding in merged:
+            scope = {"secret_type": finding.secret_type, "path": finding.path}
+            if waiver.covers(rules=finding.rules, **scope):
+                continue
+            if any(waiver.covers(rules=(rule,), **scope) for rule in finding.rules):
+                narrowed.append(waiver)
+                break
+
+    return narrowed
 
 
 def _expired_cover(waivers: WaiverDocument, finding: Finding, today: date) -> str | None:
@@ -165,7 +211,7 @@ def _expired_cover(waivers: WaiverDocument, finding: Finding, today: date) -> st
         if not waiver.is_expired(today):
             continue
         if waiver.covers(
-            rule=finding.rule,
+            rules=finding.rules,
             secret_type=finding.secret_type,
             path=finding.path,
         ):

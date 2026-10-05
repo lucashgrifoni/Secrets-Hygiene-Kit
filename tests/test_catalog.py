@@ -5,9 +5,9 @@ from __future__ import annotations
 import pytest
 
 from secguard.core.catalog import (
+    LOCAL_CATALOG_PATH,
     SEVERITY_ORDER,
     CatalogError,
-    default_catalog_override,
     load_catalog,
     max_severity,
     normalize_rule_key,
@@ -157,11 +157,24 @@ def test_an_empty_override_leaves_the_packaged_catalog_intact(tmp_path):
     assert load_catalog(override).classify("gitleaks", "aws-access-token").mapping == "catalog"
 
 
-def test_default_override_is_discovered_only_when_present(tmp_path):
-    assert default_catalog_override(tmp_path) is None
+def test_the_catalog_module_offers_no_way_to_discover_an_override():
+    """A local catalog must never be loaded without someone asking for it.
 
-    secguard_dir = tmp_path / ".secguard"
-    secguard_dir.mkdir()
-    (secguard_dir / "rules.yaml").write_text("{}", encoding="utf-8")
+    It lives inside the scanned checkout and the packaged workflow runs on
+    `pull_request`, so anyone who can open one could add `.secguard/rules.yaml`,
+    lower a severity below the threshold, and turn BLOCK into PASS. A helper
+    that returns the path to that file is a loaded gun for the next
+    contributor, so the module does not ship one.
+    """
+    import secguard.core.catalog as catalog_module
 
-    assert default_catalog_override(tmp_path) == secguard_dir / "rules.yaml"
+    assert not hasattr(catalog_module, "default_catalog_override")
+    assert LOCAL_CATALOG_PATH.as_posix() == ".secguard/rules.yaml"
+
+
+def test_an_impossible_date_in_an_override_is_a_catalog_error(tmp_path):
+    override = tmp_path / "rules.yaml"
+    override.write_text("schema: secguard.rules/v1\nreviewed_at: 2026-02-30\n", encoding="utf-8")
+
+    with pytest.raises(CatalogError, match="no date can represent"):
+        load_catalog(override)

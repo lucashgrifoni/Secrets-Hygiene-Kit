@@ -1,23 +1,24 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=77.0.3", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "secrets-hygiene-kit"
-version = "0.2.0"
+version = "0.3.0"
 description = "secguard: normalize secret-scanner reports, enforce waiver lifecycle, and run leak response playbooks."
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [{ name = "Lucas Henrique Grifoni" }]
 keywords = ["security", "secrets", "appsec", "devsecops", "gitleaks", "trufflehog", "sarif"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
   "Environment :: Console",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Security",
 ]
 dependencies = [
@@ -28,9 +29,20 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  # `build` is here because docs/adding-playbook.md tells a contributor to run
+  # `python -m build` to prove a new playbook survives packaging, and the only
+  # documented dev setup is this extra.
+  "build>=1.2,<2",
   "pytest>=8.2,<9",
   "ruff>=0.5,<1",
 ]
+
+[project.urls]
+Homepage = "https://github.com/lucashgrifoni/secrets-hygiene-kit"
+Documentation = "https://github.com/lucashgrifoni/secrets-hygiene-kit/blob/main/docs/quickstart.md"
+Repository = "https://github.com/lucashgrifoni/secrets-hygiene-kit"
+Issues = "https://github.com/lucashgrifoni/secrets-hygiene-kit/issues"
+Changelog = "https://github.com/lucashgrifoni/secrets-hygiene-kit/blob/main/CHANGELOG.md"
 
 [project.scripts]
 secguard = "secguard.cli.app:main"

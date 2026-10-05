@@ -24,11 +24,13 @@ from secguard.core.catalog import (
     max_severity,
     severity_rank,
 )
+from secguard.core.redaction import has_control_characters, sanitize_text, validation_error_details
 
 SYNTHETIC_SCAN_SCHEMA_VERSION = "secguard.synthetic-findings/v1"
 CANONICAL_FINDINGS_SCHEMA_VERSION = "secguard.findings/v1"
 
 EMPTY_FIELD_MESSAGE = "field cannot be empty"
+MAX_REPORT_BYTES = 64 * 1024 * 1024
 
 __all__ = [
     "CANONICAL_FINDINGS_SCHEMA_VERSION",
@@ -62,7 +64,17 @@ class FindingParseError(FindingError):
 
 
 def validate_repository_relative_path(value: str) -> str:
-    """Normalize to POSIX separators and reject absolute or parent-traversal paths."""
+    """Normalize to POSIX separators and reject absolute or parent-traversal paths.
+
+    Two properties matter beyond traversal. A path carrying a newline or a
+    terminal escape can forge a line of gate output, so it is rejected rather
+    than quietly rewritten into a different path that a waiver might match. And
+    `./app/x.py` and `app/x.py` name the same file, so they must normalize to
+    one value: the merge key and every waiver scope compare paths literally.
+    """
+    if has_control_characters(value):
+        raise ValueError("path cannot contain control characters, newlines, or escape sequences")
+
     normalized = value.replace("\\", "/")
     path = PurePosixPath(normalized)
 
@@ -71,7 +83,13 @@ def validate_repository_relative_path(value: str) -> str:
     if ".." in path.parts:
         raise ValueError("path cannot contain parent traversal")
 
-    return normalized
+    # PurePosixPath collapses `//`, drops `.` segments, and strips a trailing
+    # slash. `str()` of a path with no parts is `.`, which is not a file.
+    collapsed = str(path)
+    if collapsed in {".", ""}:
+        raise ValueError("path cannot be empty")
+
+    return collapsed
 
 
 class SyntheticFinding(BaseModel):
@@ -116,6 +134,23 @@ class SyntheticFinding(BaseModel):
         """Reject absolute or parent-traversal paths."""
         return validate_repository_relative_path(value)
 
+    @field_validator("rule_id", "fingerprint")
+    @classmethod
+    def validate_identifier(cls, value: str | None) -> str | None:
+        if value is not None and has_control_characters(value):
+            raise ValueError("identifier cannot contain control characters or escape sequences")
+        return value
+
+    @field_validator("message", "remediation")
+    @classmethod
+    def sanitize_summary(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = sanitize_text(value)
+        if not text:
+            raise ValueError(EMPTY_FIELD_MESSAGE)
+        return text
+
 
 class SyntheticScanDocument(BaseModel):
     """Top-level local synthetic scanner JSON document."""
@@ -129,9 +164,11 @@ class SyntheticScanDocument(BaseModel):
     @field_validator("scanner")
     @classmethod
     def validate_scanner(cls, value: str) -> str:
-        """Reject empty scanner names."""
+        """Reject empty or structurally unsafe scanner names."""
         if not value:
             raise ValueError(EMPTY_FIELD_MESSAGE)
+        if has_control_characters(value):
+            raise ValueError("scanner cannot contain control characters or escape sequences")
         return value
 
 
@@ -166,11 +203,27 @@ class Finding(BaseModel):
         default_factory=list,
         description="Other scanners that reported the same location and secret type.",
     )
+    corroborated_rules: list[str] = Field(
+        default_factory=list,
+        description="Scanner-qualified rules of the other detections merged into this finding.",
+    )
 
     @property
     def dedup_key(self) -> tuple[str, str, int | None]:
         """Return the identity used to merge the same leak across scanners."""
         return (self.secret_type, self.path, self.line)
+
+    @property
+    def rules(self) -> tuple[str, ...]:
+        """Every scanner-qualified rule that contributed to this finding.
+
+        Merging collapses the same leak reported by several detectors into one
+        record, and only the primary detection's rule survives in ``rule``. The
+        waiver lifecycle needs all of them: an exception written for one
+        scanner's match must not inherit authority over another scanner's
+        independent detection at the same location.
+        """
+        return (self.rule, *self.corroborated_rules)
 
 
 class FindingDocument(BaseModel):
@@ -266,7 +319,10 @@ def merge_findings(documents: list[FindingDocument]) -> FindingDocument:
             merged.append(primary)
             continue
 
-        scanners = sorted({item.scanner for item in group})
+        scanners = sorted(
+            {name for item in group for name in (item.scanner, *item.corroborated_by)}
+        )
+        rules = sorted({rule for item in group for rule in item.rules})
         verified_flags = [item.verified for item in group if item.verified is not None]
         merged.append(
             primary.model_copy(
@@ -278,11 +334,17 @@ def merge_findings(documents: list[FindingDocument]) -> FindingDocument:
                     ),
                     "commit": next((item.commit for item in group if item.commit), None),
                     "corroborated_by": [name for name in scanners if name != primary.scanner],
+                    "corroborated_rules": [rule for rule in rules if rule != primary.rule],
                 }
             )
         )
 
-    merged.sort(key=lambda item: (-severity_rank(item.severity), item.path, item.line or 0))
+    # `id` breaks the final tie so a merged document is byte-identical whatever
+    # order the reports were passed in. Severity, path, and line alone leave
+    # unrelated findings that share a location free to swap places.
+    merged.sort(
+        key=lambda item: (-severity_rank(item.severity), item.path, item.line or 0, item.id)
+    )
     return FindingDocument(findings=merged)
 
 
@@ -294,9 +356,21 @@ def load_synthetic_scan_file(path: Path, catalog: RuleCatalog | None = None) -> 
         raise FindingFileNotFound(f"finding path is not a file: {path}")
 
     try:
-        content: Any = json.loads(path.read_text(encoding="utf-8"))
+        content: Any = json.loads(read_bounded_report(path))
     except json.JSONDecodeError as exc:
-        raise FindingParseError(f"invalid JSON in finding file: {path}") from exc
+        raise FindingParseError(
+            f"invalid JSON in finding file {path}: line {exc.lineno} column {exc.colno}"
+        ) from exc
+    except UnicodeDecodeError as exc:
+        raise FindingParseError(
+            f"{path}: finding file is not valid UTF-8 (byte {exc.start})"
+        ) from exc
+    except RecursionError as exc:
+        raise FindingParseError(f"{path}: JSON is nested too deeply to parse") from exc
+    except ValueError as exc:
+        raise FindingParseError(f"{path}: JSON contains an unsupported numeric value") from exc
+    except OSError as exc:
+        raise FindingParseError(f"cannot read finding file {path}: {exc.strerror or exc}") from exc
 
     if not isinstance(content, dict):
         raise FindingParseError(f"finding file must contain a JSON object: {path}")
@@ -307,6 +381,15 @@ def load_synthetic_scan_file(path: Path, catalog: RuleCatalog | None = None) -> 
         raise FindingParseError(format_validation_error(path, exc)) from exc
 
     return normalize_synthetic_scan(document, catalog=catalog)
+
+
+def read_bounded_report(path: Path) -> str:
+    """Read at most the documented per-report budget, even if a file grows."""
+    with path.open("rb") as stream:
+        payload = stream.read(MAX_REPORT_BYTES + 1)
+    if len(payload) > MAX_REPORT_BYTES:
+        raise FindingParseError(f"{path}: report exceeds the 64 MiB input limit")
+    return payload.decode("utf-8")
 
 
 def normalize_synthetic_scan(
@@ -335,12 +418,9 @@ def normalize_synthetic_scan(
 
 def format_validation_error(path: Path, exc: ValidationError) -> str:
     """Format Pydantic errors without echoing raw field input values."""
-    details: list[str] = []
-    for error in exc.errors(include_input=False):
-        location = ".".join(str(part) for part in error["loc"])
-        details.append(f"{location}: {error['msg']}")
-
-    return f"invalid finding file {path}: {'; '.join(details)}"
+    return (
+        f"invalid finding file {path}: {validation_error_details(exc.errors(include_input=False))}"
+    )
 
 
 def _primary_rank(finding: Finding) -> tuple[int, int, int, str, str]:

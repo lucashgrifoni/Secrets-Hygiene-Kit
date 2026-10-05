@@ -13,13 +13,22 @@ branding:
 inputs:
   reports:
     description: >-
-      Newline- or space-separated scanner report paths. Missing paths are
-      skipped, so you can list every report your pipeline might produce.
+      Newline-separated scanner report paths, one per line. Missing paths are
+      skipped, so you can list every report your pipeline might produce, but
+      the run fails if none of them exists. Paths may contain spaces; a space
+      is never a separator.
     required: false
     default: |
       gitleaks.json
       trufflehog.jsonl
       .secrets.baseline
+  allow-missing-reports:
+    description: >-
+      Report a warning instead of failing when no scanner report is present.
+      Leave this false: a gate that finds no report has scanned nothing, and a
+      green check that scanned nothing is worse than no check at all.
+    required: false
+    default: "false"
   waivers:
     description: "Path to the secguard waiver file."
     required: false
@@ -55,8 +64,8 @@ inputs:
 
 outputs:
   verdict:
-    description: "PASS or BLOCK."
-    value: ${{ steps.gate.outputs.verdict }}
+    description: "PASS, BLOCK, ERROR, or NO-REPORTS. ERROR means no valid gate decision was made."
+    value: ${{ steps.gate.outputs.verdict || (steps.collect.outcome == 'success' && steps.collect.outputs.count == '0' && 'NO-REPORTS') || 'ERROR' }}
   reports-found:
     description: "Number of scanner reports that were actually present."
     value: ${{ steps.collect.outputs.count }}
@@ -65,21 +74,31 @@ runs:
   using: "composite"
   steps:
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
       with:
         python-version: ${{ inputs.python-version }}
 
+    # Install the caller's selected revision. Build and runtime dependencies
+    # still come from the configured Python package index.
     - name: Install secguard
       shell: bash
-      run: python -m pip install --disable-pip-version-check "secrets-hygiene-kit==0.2.0"
+      env:
+        SECGUARD_SOURCE: ${{ github.action_path }}
+      run: python -m pip install --disable-pip-version-check "$SECGUARD_SOURCE"
 
+    # Every input reaches the shell through the environment, never through
+    # `${{ }}` interpolation into a `run:` body. Interpolation splices the value
+    # into the script before bash parses it, so a workflow that passes a
+    # caller-controlled string would be handing the runner a command to execute.
     - name: Check waiver lifecycle
       shell: bash
+      env:
+        SECGUARD_WAIVERS: ${{ inputs.waivers }}
       run: |
-        if [ -f "${{ inputs.waivers }}" ]; then
-          secguard waivers check --file "${{ inputs.waivers }}"
+        if [ -f "$SECGUARD_WAIVERS" ]; then
+          secguard waivers check --file "$SECGUARD_WAIVERS"
         else
-          echo "no waiver file at ${{ inputs.waivers }}; skipping the lifecycle check"
+          echo "no waiver file at $SECGUARD_WAIVERS; skipping the lifecycle check"
         fi
 
     - name: Check playbook freshness
@@ -90,46 +109,81 @@ runs:
     - name: Collect scanner reports
       id: collect
       shell: bash
+      env:
+        SECGUARD_REPORTS: ${{ inputs.reports }}
       run: |
-        args=""
+        # One path per line. Splitting on spaces as well would shred any path
+        # containing one into two nonexistent paths, and a report that silently
+        # disappears is how a gate ends up scanning nothing while staying green.
+        list="$RUNNER_TEMP/secguard-reports.txt"
+        : > "$list"
         count=0
-        while read -r report; do
+        while IFS= read -r report; do
+          report="${report%$'\r'}"
           [ -z "$report" ] && continue
           if [ -f "$report" ]; then
-            args="$args --input $report"
+            printf '%s\n' "$report" >> "$list"
             count=$((count + 1))
           else
-            echo "skipping missing report: $report"
+            echo "no report at: $report"
           fi
-        done <<< "$(echo "${{ inputs.reports }}" | tr ' ' '\n')"
+        done <<< "$SECGUARD_REPORTS"
         echo "count=$count" >> "$GITHUB_OUTPUT"
-        echo "args=$args" >> "$GITHUB_OUTPUT"
 
     - name: Secret hygiene gate
       id: gate
       if: steps.collect.outputs.count != '0'
       shell: bash
+      env:
+        SECGUARD_WAIVERS: ${{ inputs.waivers }}
+        SECGUARD_FAIL_ON: ${{ inputs.fail-on }}
+        SECGUARD_RULES: ${{ inputs.rules }}
+        SECGUARD_SARIF: ${{ inputs.sarif-output }}
+        SECGUARD_MARKDOWN: ${{ inputs.markdown-output }}
+        SECGUARD_COMMENT: ${{ inputs.comment-output }}
       run: |
-        extra=""
-        [ -n "${{ inputs.rules }}" ] && extra="$extra --rules ${{ inputs.rules }}"
-        [ -n "${{ inputs.sarif-output }}" ] && extra="$extra --sarif ${{ inputs.sarif-output }}"
-        [ -n "${{ inputs.markdown-output }}" ] && extra="$extra --markdown ${{ inputs.markdown-output }}"
-        [ -n "${{ inputs.comment-output }}" ] && extra="$extra --pr-comment ${{ inputs.comment-output }}"
+        # An array, not a string: word splitting would break every path that
+        # contains a space, which is the same bug one layer down.
+        args=()
+        while IFS= read -r report; do
+          args+=(--input "$report")
+        done < "$RUNNER_TEMP/secguard-reports.txt"
 
-        if secguard scan check ${{ steps.collect.outputs.args }} \
-          --waivers "${{ inputs.waivers }}" \
-          --fail-on "${{ inputs.fail-on }}" \
-          $extra; then
+        if [ -n "$SECGUARD_RULES" ]; then args+=(--rules "$SECGUARD_RULES"); fi
+        if [ -n "$SECGUARD_SARIF" ]; then args+=(--sarif "$SECGUARD_SARIF"); fi
+        if [ -n "$SECGUARD_MARKDOWN" ]; then args+=(--markdown "$SECGUARD_MARKDOWN"); fi
+        if [ -n "$SECGUARD_COMMENT" ]; then args+=(--pr-comment "$SECGUARD_COMMENT"); fi
+
+        if secguard scan check "${args[@]}" \
+          --waivers "$SECGUARD_WAIVERS" \
+          --fail-on "$SECGUARD_FAIL_ON"; then
           echo "verdict=PASS" >> "$GITHUB_OUTPUT"
         else
           status=$?
-          echo "verdict=BLOCK" >> "$GITHUB_OUTPUT"
+          if [ "$status" -eq 1 ]; then
+            echo "verdict=BLOCK" >> "$GITHUB_OUTPUT"
+          else
+            echo "verdict=ERROR" >> "$GITHUB_OUTPUT"
+          fi
           exit $status
         fi
 
-    - name: Report no scanner input
+    # A gate that found no report has scanned nothing. Reporting that as success
+    # makes a misconfigured pipeline indistinguishable from a clean repository,
+    # so it fails unless the caller says otherwise in writing.
+    - name: Fail when no scanner report was found
       if: steps.collect.outputs.count == '0'
       shell: bash
+      env:
+        SECGUARD_REPORTS: ${{ inputs.reports }}
+        SECGUARD_ALLOW_MISSING: ${{ inputs.allow-missing-reports }}
       run: |
-        echo "::warning title=secguard::No scanner report was found, so no finding gate ran."
-        echo "secguard reads reports; add a detector step that writes one of: ${{ inputs.reports }}"
+        echo "secguard reads reports and never runs a scanner. Add a detector"
+        echo "step that writes one of these paths, or correct the reports input:"
+        printf '%s\n' "$SECGUARD_REPORTS"
+        if [ "$SECGUARD_ALLOW_MISSING" = "true" ]; then
+          echo "::warning title=secguard::No scanner report was found, so nothing was gated."
+          exit 0
+        fi
+        echo "::error title=secguard::No scanner report was found, so nothing was gated."
+        exit 1

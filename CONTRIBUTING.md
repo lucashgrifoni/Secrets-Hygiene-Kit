@@ -1,68 +1,48 @@
 # Contributing
 
-## Development Setup
+Use Python 3.12, 3.13 or 3.14 in a virtual environment.
 
-Use Python 3.12 or newer.
-
-```bash
+```console
 python -m pip install -e ".[dev]"
 python -m pytest
-python -m ruff check .
-python -m ruff format --check .
+python -m ruff check src tests scripts
+python -m ruff format --check src tests scripts
+python -m build
 ```
 
-## Non-negotiables
+## Development boundaries
 
-These are the properties the project exists to guarantee. A change that breaks
-one is a defect, not a trade-off to discuss.
+Keep detection with external scanners and credential changes with authorized
+responders. Do not add scanner execution or provider mutation to the CLI.
 
-- **Never commit real secrets**, access tokens, private keys, production URLs,
-  or customer data. Fixtures use obviously synthetic canary strings.
-- **secguard never runs a scanner.** Detection stays with the tool the team
-  already trusts, which keeps scanner binaries out of this project's supply
-  chain and keeps every adapter deterministically testable.
-- **secguard never rotates, revokes, or mutates provider state.** Playbooks
-  instruct humans who hold the authority to act.
-- **No secret material reaches output.** Adapters read scanner reports by
-  allowlist, never denylist: name the metadata keys you need and ignore
-  everything else, so a new detector field that happens to carry a credential
-  cannot leak in by default.
+Use synthetic fixtures. Never commit credentials, production account details
+or customer data. Adapters read selected metadata and discard documented
+credential fields. Redaction tests must contain a canary before asserting its
+absence from output.
 
-## Adding a scanner adapter
+Changes to gate decisions need passing, blocking and malformed-input cases.
+Security fixes need a regression that demonstrates the vulnerable behavior
+before the change and correct behavior afterward. Use explicit dates for
+expiry and freshness tests.
 
-1. Add `src/secguard/core/detectors/<scanner>.py` with `parse_report` and a
-   `looks_like_<scanner>` structural probe. Infer the format from payload
-   structure, never from the file name.
-2. Read only the keys you need. Document in the module docstring which
-   secret-bearing fields you are deliberately ignoring.
-3. Add a **redacted** fixture under `tests/fixtures/` whose secret-bearing
-   fields contain a `SECGUARD-CANARY-DO-NOT-EMIT-*` value, and register it in
-   `tests/conftest.py`. The redaction suite then covers your adapter across
-   every output path automatically.
-4. Map the detector's rule identifiers in `src/secguard/data/rules.yaml`. Map
-   only what you can defend: a wrong mapping sends a responder down a
-   provider-specific path that does not apply, which is worse than the honest
-   `mapping: fallback`.
+## Adapters and playbooks
 
-## Adding a playbook
+A detector adapter implements parsing and a structural format probe under
+`src/secguard/core/detectors/`. Add synthetic fixtures and tests covering
+JSON, SARIF, Markdown and console output. Update the rule catalog only when
+the mapping is supported by the detector's documented rule.
 
-See [docs/adding-playbook.md](docs/adding-playbook.md). In short: seven required
-sections, human instructions only, no secret values, and a `Vetted:` date that
-means a human checked the steps against current vendor documentation on that
-date. Do not bump the date without doing the review.
+See [adding-playbook.md](docs/adding-playbook.md) for response guidance. A
+`Vetted:` date requires a review against current provider documentation; it
+does not establish that actions were exercised in an account.
 
-## Waivers
+## Exceptions and review
 
-Every waiver needs an owner, a reason without secret values, an approver, and an
-expiry date tied to a real revisit plan. The gate enforces the expiry, so treat
-it as a commitment rather than a formality.
+A waiver needs a reason without credential values, an owner, approver and
+expiry. Protect waiver and catalog changes through repository review.
+The CLI records these fields without authenticating their authors.
 
-## Tests
-
-Test the behaviour, not the implementation. In particular:
-
-- new parsing paths need a malformed-input test,
-- new output surfaces need redaction coverage,
-- new gate behaviour needs both the passing and the blocking case, and
-- anything date-dependent takes an explicit date so the suite stays
-  deterministic.
+Open a focused pull request that describes the observable change and its
+validation. The release check covers Linux and Windows, installed packages,
+the composite Action and dependency review. See [SECURITY.md](SECURITY.md)
+for private vulnerability reporting.

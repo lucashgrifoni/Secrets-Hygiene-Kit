@@ -42,11 +42,11 @@ def test_generated_workflow_never_executes_a_scanner(tmp_path):
     workflow = _workflow(tmp_path)
     active = _active_yaml(workflow)
 
-    assert "gitleaks detect" not in active
+    assert "gitleaks git" not in active
     assert "trufflehog git" not in active
     # gitleaks is still named, as a report file the gate reads and as commented guidance.
     assert "gitleaks.json" in active
-    assert "gitleaks detect" in workflow
+    assert "gitleaks git" in workflow
 
 
 def test_generated_workflow_grants_only_read_permission(tmp_path):

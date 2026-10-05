@@ -9,6 +9,7 @@ allowlist of metadata keys and never touches those fields.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from secguard.core.catalog import RuleCatalog
@@ -72,7 +73,11 @@ def _build(entry: dict[str, Any], source: str, index: int, catalog: RuleCatalog)
         scanner=SCANNER_NAME,
         rule_id=rule_id,
         path=path,
-        message=sanitize_text(description) if description else f"gitleaks rule {rule_id} matched",
+        message=(
+            sanitize_text(description)
+            if isinstance(description, str) and description.strip()
+            else f"gitleaks rule {rule_id} matched"
+        ),
         catalog=catalog,
         line=positive_int(pick(entry, "StartLine", "startLine")),
         column=positive_int(pick(entry, "StartColumn", "startColumn")),
@@ -86,4 +91,7 @@ def _fingerprint(entry: dict[str, Any]) -> str | None:
     value = pick(entry, "Fingerprint", "fingerprint")
     if not isinstance(value, str) or not value.strip():
         return None
-    return f"gitleaks:{sanitize_text(value, max_length=160)}"
+    safe = sanitize_text(value, max_length=max(160, len(value)))
+    if len(safe) > 160:
+        return f"gitleaks:sha256:{hashlib.sha256(safe.encode('utf-8')).hexdigest()}"
+    return f"gitleaks:{safe}"

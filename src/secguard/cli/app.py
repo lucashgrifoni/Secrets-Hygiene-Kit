@@ -9,7 +9,10 @@ Exit codes are stable across commands so CI can rely on them:
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import sys
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated
@@ -18,8 +21,14 @@ import typer
 
 from secguard import __version__
 from secguard.core import report as report_renderer
-from secguard.core.catalog import CatalogError, RuleCatalog, load_catalog
-from secguard.core.detectors import SUPPORTED_FORMATS, load_reports
+from secguard.core.catalog import (
+    LOCAL_CATALOG_PATH,
+    CatalogError,
+    RuleCatalog,
+    load_catalog,
+    severity_rank,
+)
+from secguard.core.detectors import SUPPORTED_FORMATS, is_empty_report, load_reports
 from secguard.core.findings import FindingDocument, FindingError, load_synthetic_scan_file
 from secguard.core.incident import render_incident
 from secguard.core.playbooks import (
@@ -30,6 +39,7 @@ from secguard.core.playbooks import (
     stale_playbooks,
 )
 from secguard.core.reconcile import EXIT_GATE_FAILED, FAIL_ON_CHOICES, ScanOutcome, reconcile
+from secguard.core.redaction import sanitize_text
 from secguard.core.sarif import build_sarif, waiver_summary
 from secguard.core.scaffold import CiProvider, InitError, initialize_project
 from secguard.core.waivers import (
@@ -39,11 +49,22 @@ from secguard.core.waivers import (
     load_waiver_file,
     load_waiver_file_or_empty,
 )
+from secguard.core.writing import UnsafeWriteError, assert_writable
 
 DEFAULT_WAIVER_FILE = Path(".secguard/waivers.yaml")
 EXIT_INPUT_ERROR = 2
 
+# The audited pre-commit bypass. Local prevention only; the CI gate ignores it.
+OVERRIDE_ENV = "SECGUARD_OVERRIDE"
+OVERRIDE_REASON_ENV = "SECGUARD_OVERRIDE_REASON"
+MIN_OVERRIDE_REASON_LENGTH = 12
+
 FAIL_ON_HELP = f"Blocking severity threshold: {', '.join(FAIL_ON_CHOICES)}."
+RULES_HELP = (
+    "Local rule catalog merged over the packaged one, conventionally "
+    f"{LOCAL_CATALOG_PATH.as_posix()}. Never loaded implicitly: an override can "
+    "lower a severity, so adopting one is the workflow author's decision."
+)
 
 app = typer.Typer(
     help=(
@@ -69,7 +90,32 @@ app.add_typer(incident_app, name="incident")
 
 def main() -> None:
     """Console script entry point."""
-    app()
+    use_utf8_output()
+    # Windows Click expands globs in argv against the working directory before
+    # parsing. `--path 'tests/fixtures/**'` would then be rewritten to whatever
+    # happened to match: one hit becomes a literal directory the operator never
+    # approved, several become "unexpected extra arguments". A waiver scope is a
+    # pattern, not a file list, so argv is taken literally on every platform.
+    app(windows_expand_args=False)
+
+
+def use_utf8_output() -> None:
+    """Write UTF-8 with LF line endings on every platform.
+
+    A redirected stream on Windows defaults to the ANSI code page, so
+    `secguard playbooks show generic-private-key > playbook.md` produced a file
+    that is not valid UTF-8 — for a document a responder attaches to an incident
+    record. Files written through `--output` were already UTF-8; this makes the
+    redirect path agree with them.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        # A detached or already-wrapped stream cannot be reconfigured, and that
+        # is not worth failing a scan over.
+        with contextlib.suppress(OSError, ValueError):
+            reconfigure(encoding="utf-8", newline="\n")
 
 
 # --------------------------------------------------------------------------- helpers
@@ -102,10 +148,143 @@ def _parse_expiry(value: str) -> date:
 
 
 def _load_catalog(rules: Path | None) -> RuleCatalog:
+    """Load the packaged catalog, merging a local override only when asked.
+
+    A local catalog is never picked up implicitly. It lives inside the scanned
+    checkout, and the packaged workflow runs on `pull_request`, so its content
+    is supplied by whoever opened the pull request. A catalog can lower a
+    severity, and a severity below the threshold is a finding that does not
+    block — so auto-loading it would let one added file turn BLOCK into PASS,
+    with none of the waiver lifecycle's owner, approver, or expiry.
+
+    Requiring `--rules` keeps that decision with whoever wrote the workflow.
+    """
     try:
-        return load_catalog(rules)
+        catalog = load_catalog(rules)
     except CatalogError as exc:
         raise _fail(str(exc)) from exc
+    except OSError as exc:
+        raise _fail(f"cannot access rule catalog: {exc.strerror or 'filesystem error'}") from exc
+
+    if rules is not None:
+        _warn_about_downgrades(catalog)
+        _warn_about_missing_playbooks(catalog)
+
+    return catalog
+
+
+def _warn_about_missing_playbooks(catalog: RuleCatalog) -> None:
+    """Name secret types whose playbook is not installed.
+
+    The catalog validates that a playbook slug is well formed, not that it
+    exists. A finding routed to a missing playbook still prints
+    `secguard incident start --secret-type X` on the gate summary, and that
+    command fails — mid-incident, which is the worst possible moment to
+    discover a typo in a config file.
+    """
+    try:
+        installed = {playbook.slug for playbook in load_all()}
+    except PlaybookError:  # pragma: no cover - the playbooks check reports this properly
+        return
+
+    missing = sorted(
+        {
+            definition.playbook
+            for definition in catalog.secret_types.values()
+            if definition.playbook not in installed
+        }
+    )
+    if missing:
+        _note(
+            f"the rule override routes to {len(missing)} playbook(s) that are not installed: "
+            f"{', '.join(missing)}. `secguard incident start` will fail for those secret types."
+        )
+
+
+def _warn_about_downgrades(catalog: RuleCatalog) -> None:
+    """Name every way an override lowers the severity a finding would actually get.
+
+    An override is a legitimate feature, and lowering a severity is a legitimate
+    use of it. What is not legitimate is doing so invisibly: the reviewer of a
+    passing gate deserves to know the threshold was met by re-rating rather than
+    by remediation.
+
+    Comparing secret-type defaults alone was not enough, and the gap was the
+    whole point of the warning. A catalog can lower what a rule resolves to in
+    four ways, and three of them left that default untouched: a per-rule
+    `severity:`, a remap to a different secret type that happens to be milder,
+    and a remap to a brand-new mild type. Each one flipped BLOCK to PASS in
+    silence. So the comparison runs on the *resolved* classification of every
+    detector rule either catalog knows.
+    """
+    packaged = load_catalog()
+    lowered: set[str] = set()
+
+    before_fallback = packaged.secret_types[packaged.fallback_secret_type]
+    after_fallback = catalog.secret_types[catalog.fallback_secret_type]
+    if severity_rank(after_fallback.severity) < severity_rank(before_fallback.severity):
+        lowered.add(f"fallback {before_fallback.severity}->{after_fallback.severity}")
+
+    for scanner in set(packaged.detectors) | set(catalog.detectors):
+        rules = set(packaged.detectors.get(scanner, {})) | set(catalog.detectors.get(scanner, {}))
+        for rule_id in rules:
+            before = packaged.classify(scanner, rule_id)
+            after = catalog.classify(scanner, rule_id)
+            if severity_rank(after.severity) < severity_rank(before.severity):
+                lowered.add(
+                    f"{scanner}:{rule_id} {before.severity}->{after.severity}"
+                    + (
+                        f" (now {after.secret_type})"
+                        if after.secret_type != before.secret_type
+                        else ""
+                    )
+                )
+
+    # A secret type nothing currently maps to can still be lowered, and a rule
+    # added later would inherit it.
+    for name, definition in catalog.secret_types.items():
+        packaged_definition = packaged.secret_types.get(name)
+        if packaged_definition and severity_rank(definition.severity) < severity_rank(
+            packaged_definition.severity
+        ):
+            lowered.add(f"{name} {packaged_definition.severity}->{definition.severity}")
+
+    if lowered:
+        _note(
+            f"the rule override lowers {len(lowered)} severity value(s): "
+            + ", ".join(sorted(lowered))
+        )
+
+
+def _audited_override(allow: bool, *, bypassing: str) -> bool:
+    """Return whether an audited local bypass applies, failing if it is unjustified.
+
+    The spec's prevention layer needs an escape hatch a developer can reach at
+    2am without deleting the hook, but an unexplained bypass is indistinguishable
+    from a broken check. So the reason is mandatory, the finding is still printed
+    before the bypass is granted, and the record names who allowed what.
+
+    Only commands that opt in with `--allow-override` consult this, and only the
+    packaged pre-commit hooks pass that flag. `scan check` never does: a CI gate
+    an environment variable can switch off is not a gate.
+    """
+    if not allow or os.environ.get(OVERRIDE_ENV) != "1":
+        return False
+
+    reason = sanitize_text(os.environ.get(OVERRIDE_REASON_ENV, ""), max_length=200)
+    if len(reason) < MIN_OVERRIDE_REASON_LENGTH:
+        raise _fail(
+            f"{OVERRIDE_ENV}=1 needs {OVERRIDE_REASON_ENV} set to at least "
+            f"{MIN_OVERRIDE_REASON_LENGTH} characters explaining why this commit "
+            "cannot wait for the check to pass"
+        )
+
+    _note(
+        f"OVERRIDE: {bypassing} was bypassed on "
+        f"{datetime.now(UTC).date().isoformat()} because: {reason}"
+    )
+    _note("Record this in the commit message. The check still fails in CI.")
+    return True
 
 
 def _load_waivers(file: Path, *, required: bool) -> WaiverDocument:
@@ -117,6 +296,8 @@ def _load_waivers(file: Path, *, required: bool) -> WaiverDocument:
         return load_waiver_file_or_empty(file)
     except WaiverError as exc:
         raise _fail(str(exc)) from exc
+    except OSError as exc:
+        raise _fail(f"cannot access waiver file: {exc.strerror or 'filesystem error'}") from exc
 
 
 def _load_findings(
@@ -124,15 +305,42 @@ def _load_findings(
     report_format: str,
     catalog: RuleCatalog,
 ) -> FindingDocument:
+    empty = [path for path in inputs if is_empty_report(path)]
+    for path in empty:
+        _note(
+            f"{path.as_posix()} is empty; treating it as zero findings. "
+            "A detector that failed to run leaves the same file behind."
+        )
+
+    # One empty report is normal: a clean trufflehog run writes JSON Lines with
+    # no lines. Every report empty is still legitimate for a trufflehog-only
+    # setup, so it cannot fail the run, but it is also what a whole detector
+    # stage that never executed looks like — and that deserves more than one
+    # line among several.
+    if empty and len(empty) == len(inputs):
+        _note(
+            f"every one of the {len(inputs)} report(s) was empty, so nothing was actually "
+            "examined. That is expected only if every detector you ran found nothing and "
+            "writes JSON Lines. Confirm the detector step ran and wrote where you think."
+        )
+
     try:
         return load_reports(inputs, report_format=report_format, catalog=catalog)  # type: ignore[arg-type]
     except FindingError as exc:
         raise _fail(str(exc)) from exc
+    except OSError as exc:
+        raise _fail(f"cannot access scanner report: {exc.strerror or 'filesystem error'}") from exc
 
 
 def _write_output(path: Path, content: str) -> None:
-    if path.is_symlink():
-        raise _fail(f"refusing to write through a symlink: {path.as_posix()}")
+    try:
+        assert_writable(path)
+    except UnsafeWriteError as exc:
+        raise _fail(str(exc)) from exc
+    except OSError as exc:
+        raise _fail(
+            f"cannot write {path.as_posix()}: {exc.strerror or 'filesystem error'}"
+        ) from exc
 
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -189,6 +397,10 @@ def init_project(
         results = initialize_project(destination, ci=ci, dry_run=dry_run, force=force)
     except InitError as exc:
         raise _fail(str(exc)) from exc
+    except OSError as exc:
+        raise _fail(
+            f"cannot access scaffold destination: {exc.strerror or 'filesystem error'}"
+        ) from exc
 
     for result in results:
         typer.echo(f"{result.action}\t{result.destination.as_posix()}")
@@ -214,7 +426,7 @@ def render_report_command(
     ] = None,
     rules: Annotated[
         Path | None,
-        typer.Option("--rules", help="Local rule catalog override merged over the packaged one."),
+        typer.Option("--rules", help=RULES_HELP),
     ] = None,
     today: Annotated[
         str | None,
@@ -279,7 +491,7 @@ def scan_check(
     ] = None,
     rules: Annotated[
         Path | None,
-        typer.Option("--rules", help="Local rule catalog override merged over the packaged one."),
+        typer.Option("--rules", help=RULES_HELP),
     ] = None,
     today: Annotated[
         str | None,
@@ -340,16 +552,38 @@ def _print_scan_summary(outcome: ScanOutcome, check_date: date) -> None:
         location = f"{finding.path}:{finding.line}" if finding.line else finding.path
         suffix = f" expired-waiver={result.expired_waiver_id}" if result.expired_waiver_id else ""
         verified = " verified=live" if finding.verified else ""
+        # A merged finding shows every rule that contributed, because a waiver
+        # has to cover all of them before it suppresses anything.
+        also = (
+            f"\talso={','.join(finding.corroborated_rules)}" if finding.corroborated_rules else ""
+        )
+        # A guessed classification has to look different from a confident one
+        # here, not only in the JSON. This line is what a responder reads first.
+        mapping = "\tmapping=fallback" if finding.mapping == "fallback" else ""
         typer.echo(
             f"- {finding.severity}\t{finding.secret_type}\t{location}\t"
-            f"rule={finding.rule}\tplaybook={finding.playbook}{verified}{suffix}"
+            f"rule={finding.rule}{also}\tplaybook={finding.playbook}{mapping}{verified}{suffix}"
         )
 
     for waiver in outcome.expired_waivers:
         typer.echo(f"- expired-waiver\t{waiver_summary(waiver)}")
 
+    narrowed = {waiver.id for waiver in outcome.narrowed_waivers}
     for waiver in outcome.unused_waivers:
-        typer.echo(f"- unused-waiver\t{waiver.id} rule={waiver.rule} path={waiver.path}")
+        reason = (
+            "\tcovers only one detector of a finding several reported; widen it to secret-type:"
+            if waiver.id in narrowed
+            else ""
+        )
+        typer.echo(f"- unused-waiver\t{waiver.id} rule={waiver.rule} path={waiver.path}{reason}")
+
+    unused_ids = {waiver.id for waiver in outcome.unused_waivers}
+    for waiver in outcome.narrowed_waivers:
+        if waiver.id not in unused_ids:
+            typer.echo(
+                f"- partial-waiver\t{waiver.id} rule={waiver.rule} path={waiver.path}"
+                "\tcovers only part of a corroborated finding; review secret-type: scope"
+            )
 
     if outcome.failed:
         reasons = []
@@ -378,7 +612,7 @@ def normalize_scan(
     ] = None,
     rules: Annotated[
         Path | None,
-        typer.Option("--rules", help="Local rule catalog override merged over the packaged one."),
+        typer.Option("--rules", help=RULES_HELP),
     ] = None,
 ) -> None:
     """Normalize one scanner report into the canonical secguard finding schema."""
@@ -405,6 +639,16 @@ def check_waivers(
         str | None,
         typer.Option("--today", help="Override current date for deterministic checks."),
     ] = None,
+    allow_override: Annotated[
+        bool,
+        typer.Option(
+            "--allow-override",
+            help=(
+                f"Honor an audited local bypass: {OVERRIDE_ENV}=1 plus "
+                f"{OVERRIDE_REASON_ENV}. For pre-commit only; never pass this in CI."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Fail when any waiver is expired."""
     document = _load_waivers(file, required=True)
@@ -418,6 +662,10 @@ def check_waivers(
                 f"- {waiver.id} rule={waiver.rule} path={waiver.path} "
                 f"expires_at={waiver.expires_at.isoformat()} owner={waiver.owner}"
             )
+        # Printed first, then bypassed: a developer who overrides still sees
+        # exactly what they are carrying past the hook.
+        if _audited_override(allow_override, bypassing="the waiver expiry check"):
+            return
         raise typer.Exit(code=EXIT_GATE_FAILED)
 
     typer.echo(f"All {len(document.waivers)} waiver(s) are active as of {check_date.isoformat()}.")
@@ -500,6 +748,8 @@ def add_waiver_command(
         )
     except WaiverError as exc:
         raise _fail(str(exc)) from exc
+    except OSError as exc:
+        raise _fail(f"cannot write waiver file: {exc.strerror or 'filesystem error'}") from exc
 
     for warning in warnings:
         _note(f"warning: {warning}")
@@ -559,6 +809,16 @@ def check_playbooks(
         int,
         typer.Option("--max-age-days", help="Review window before a playbook counts as stale."),
     ] = DEFAULT_MAX_AGE_DAYS,
+    allow_override: Annotated[
+        bool,
+        typer.Option(
+            "--allow-override",
+            help=(
+                f"Honor an audited local bypass: {OVERRIDE_ENV}=1 plus "
+                f"{OVERRIDE_REASON_ENV}. For pre-commit only; never pass this in CI."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Fail when a playbook has not been vetted inside the review window."""
     check_date = _parse_today(today)
@@ -575,6 +835,8 @@ def check_playbooks(
                 f"- {playbook.slug} vetted={playbook.vetted.isoformat()} "
                 f"age_days={playbook.age_days(check_date)}"
             )
+        if _audited_override(allow_override, bypassing="the playbook freshness check"):
+            return
         raise typer.Exit(code=EXIT_GATE_FAILED)
 
     typer.echo(
@@ -617,7 +879,7 @@ def start_incident(
     ] = None,
     rules: Annotated[
         Path | None,
-        typer.Option("--rules", help="Local rule catalog override merged over the packaged one."),
+        typer.Option("--rules", help=RULES_HELP),
     ] = None,
     max_age_days: Annotated[
         int,
@@ -661,4 +923,4 @@ def start_incident(
         _write_output(output, checklist)
 
 
-__all__ = ["app", "load_synthetic_scan_file", "main"]
+__all__ = ["app", "load_synthetic_scan_file", "main", "use_utf8_output"]

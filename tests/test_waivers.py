@@ -148,14 +148,44 @@ def test_waiver_covers_matches_rule_and_path():
     waiver = _waiver()
 
     assert waiver.covers(
-        rule="gitleaks:aws-access-token",
+        rules=("gitleaks:aws-access-token",),
         secret_type="aws-access-key",
         path="tests/fixtures/dummy.py",
     )
     assert not waiver.covers(
-        rule="gitleaks:github-pat",
+        rules=("gitleaks:github-pat",),
         secret_type="github-pat",
         path="tests/fixtures/dummy.py",
+    )
+
+
+def test_a_detector_scoped_waiver_must_cover_every_contributing_rule():
+    """Partial coverage of a merged finding is no coverage at all.
+
+    Merging collapses the same leak reported by several detectors into one
+    record. If a waiver written for one detector could suppress the merged
+    record, adding a second scanner would silence the first scanner's alert
+    instead of corroborating it.
+    """
+    waiver = _waiver()
+    merged = ("gitleaks:aws-access-token", "trufflehog:AWS")
+
+    assert not waiver.covers(
+        rules=merged, secret_type="aws-access-key", path="tests/fixtures/dummy.py"
+    )
+    assert _waiver(rule="*").covers(
+        rules=merged, secret_type="aws-access-key", path="tests/fixtures/dummy.py"
+    )
+    # The canonical secret type is the merge key, so it is shared by every
+    # contributing detection and a `secret-type:` waiver still applies.
+    assert _waiver(rule="secret-type:aws-access-key").covers(
+        rules=merged, secret_type="aws-access-key", path="tests/fixtures/dummy.py"
+    )
+
+
+def test_a_waiver_covers_nothing_when_no_rule_contributed():
+    assert not _waiver().covers(
+        rules=(), secret_type="aws-access-key", path="tests/fixtures/dummy.py"
     )
 
 
@@ -164,7 +194,7 @@ def test_waiver_covers_ignores_expiry_so_reconcile_can_report_the_reason():
 
     assert expired.is_expired(date(2026, 8, 4))
     assert expired.covers(
-        rule="gitleaks:aws-access-token",
+        rules=("gitleaks:aws-access-token",),
         secret_type="aws-access-key",
         path="tests/fixtures/dummy.py",
     )
@@ -231,3 +261,27 @@ def test_document_helper_types():
 
     assert isinstance(document, WaiverDocument)
     assert document.waivers == []
+
+
+def test_an_impossible_date_is_an_input_error_not_a_crash(tmp_path):
+    """PyYAML resolves `2026-02-30` before secguard sees it and raises ValueError.
+
+    Letting that escape turned a typo into a traceback and exit 1, which a CI
+    log reads as "the gate blocked" rather than "fix your waiver file".
+    """
+    path = tmp_path / "waivers.yaml"
+    path.write_text(
+        "schema: secguard.waiver/v1\n"
+        "waivers:\n"
+        "  - id: WV-2026-001\n"
+        "    rule: gitleaks:aws-access-token\n"
+        "    path: app/config.py\n"
+        "    reason: r\n"
+        "    owner: o\n"
+        "    approver: a\n"
+        "    expires_at: 2026-02-30\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(WaiverParseError, match="no date can represent"):
+        load_waiver_file(path)

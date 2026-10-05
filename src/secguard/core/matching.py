@@ -14,15 +14,38 @@ semantics instead:
 
 from __future__ import annotations
 
-import re
 from functools import lru_cache
 
-__all__ = ["path_matches", "rule_matches"]
+__all__ = [
+    "MAX_WILDCARDS",
+    "PatternTooComplex",
+    "assert_pattern_is_simple",
+    "path_matches",
+    "rule_matches",
+]
+
+# Preserve the existing scope-review policy. Runtime safety no longer depends
+# on this limit: even an allowed four-star pattern backtracked for seconds.
+MAX_WILDCARDS = 4
+
+
+class PatternTooComplex(ValueError):
+    """Raised when a waiver pattern has more wildcards than are defensible."""
+
+
+def assert_pattern_is_simple(pattern: str, *, field: str) -> None:
+    """Keep waiver patterns within the existing scope-review budget."""
+    wildcards = pattern.count("*") + pattern.count("?")
+    if wildcards > MAX_WILDCARDS:
+        raise PatternTooComplex(
+            f"{field} has {wildcards} wildcards; secguard allows at most {MAX_WILDCARDS}, "
+            "to keep exception scopes reviewable"
+        )
 
 
 def path_matches(pattern: str, value: str) -> bool:
     """Return whether a repository-relative path matches a waiver path pattern."""
-    return _path_regex(pattern).match(value.replace("\\", "/")) is not None
+    return _match(_tokens(pattern, path=True), value.replace("\\", "/"))
 
 
 def rule_matches(pattern: str, value: str) -> bool:
@@ -31,51 +54,68 @@ def rule_matches(pattern: str, value: str) -> bool:
     Rule identifiers use ``:`` rather than ``/`` as a separator, so ``*`` is
     free to match anything: ``gitleaks:*`` waives every gitleaks rule.
     """
-    return _rule_regex(pattern).match(value) is not None
+    return _match(_tokens(pattern, path=False), value)
 
 
 @lru_cache(maxsize=512)
-def _path_regex(pattern: str) -> re.Pattern[str]:
-    return re.compile(_translate_path(pattern), re.DOTALL)
-
-
-@lru_cache(maxsize=512)
-def _rule_regex(pattern: str) -> re.Pattern[str]:
-    translated = "".join(
-        ".*" if character == "*" else "." if character == "?" else re.escape(character)
-        for character in pattern
-    )
-    return re.compile(f"^{translated}$", re.DOTALL)
-
-
-def _translate_path(pattern: str) -> str:
-    parts: list[str] = ["^"]
+def _tokens(pattern: str, *, path: bool) -> tuple[tuple[str, str], ...]:
+    tokens: list[tuple[str, str]] = []
     index = 0
-    length = len(pattern)
-
-    while index < length:
-        character = pattern[index]
-
-        if character == "*":
-            if pattern.startswith("**/", index):
-                parts.append("(?:[^/]+/)*")
+    while index < len(pattern):
+        if path and pattern.startswith("**/", index):
+            tokens.append(("directories", ""))
+            while pattern.startswith("**/", index):
                 index += 3
-                continue
-            if pattern.startswith("**", index):
-                parts.append(".*")
-                index += 2
-                continue
-            parts.append("[^/]*")
+        elif path and pattern.startswith("**", index):
+            tokens.append(("star", ""))
+            index += 2
+        elif pattern[index] == "*":
+            tokens.append(("segment-star" if path else "star", ""))
             index += 1
-            continue
-
-        if character == "?":
-            parts.append("[^/]")
+        elif pattern[index] == "?":
+            tokens.append(("segment-one" if path else "one", ""))
             index += 1
-            continue
+        else:
+            end = index + 1
+            while end < len(pattern) and pattern[end] not in "*?":
+                end += 1
+            tokens.append(("literal", pattern[index:end]))
+            index = end
+    return tuple(tokens)
 
-        parts.append(re.escape(character))
-        index += 1
 
-    parts.append("$")
-    return "".join(parts)
+def _match(tokens: tuple[tuple[str, str], ...], value: str) -> bool:
+    """Match reachable prefixes in O(tokens * value) time and O(value) space."""
+    if not tokens:
+        return not value
+    if len(tokens) == 1 and tokens[0][0] == "literal":
+        return tokens[0][1] == value
+    previous = [True] + [False] * len(value)
+    for kind, literal in tokens:
+        current = [False] * (len(value) + 1)
+        if kind in {"star", "segment-star"}:
+            current[0] = previous[0]
+            for index, character in enumerate(value):
+                current[index + 1] = previous[index + 1] or (
+                    current[index] and (kind == "star" or character != "/")
+                )
+        elif kind == "directories":
+            current = previous.copy()  # Zero directories is a valid match.
+            in_segment = False
+            for index, character in enumerate(value):
+                if character == "/":
+                    current[index + 1] = current[index + 1] or in_segment
+                    in_segment = False
+                else:
+                    in_segment = in_segment or previous[index] or current[index]
+        elif kind == "literal":
+            size = len(literal)
+            for index, reachable in enumerate(previous):
+                if reachable and value.startswith(literal, index):
+                    current[index + size] = True
+        else:
+            for index, character in enumerate(value):
+                matches = kind == "one" or character != "/"
+                current[index + 1] = previous[index] and matches
+        previous = current
+    return previous[-1]

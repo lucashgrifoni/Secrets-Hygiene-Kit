@@ -49,7 +49,7 @@ def test_rules_are_keyed_by_canonical_secret_type_not_detector_rule(sarif):
     """One leak reported by three scanners must become one code-scanning alert."""
     rule_ids = [rule["id"] for rule in sarif["runs"][0]["tool"]["driver"]["rules"]]
 
-    assert "aws-access-key" in rule_ids
+    assert "aws-access-key/critical" in rule_ids
     assert "gitleaks:aws-access-token" not in rule_ids
     assert len(rule_ids) == len(set(rule_ids))
 
@@ -65,13 +65,15 @@ def test_severity_maps_to_sarif_level_and_github_security_severity(sarif):
     rules = {rule["id"]: rule for rule in sarif["runs"][0]["tool"]["driver"]["rules"]}
     results = {result["ruleId"]: result for result in sarif["runs"][0]["results"]}
 
-    assert results["aws-access-key"]["level"] == "error"
+    assert results["aws-access-key/critical"]["level"] == "error"
     assert rules["postgres-uri"]["properties"]["security-severity"] == "8.0"
     assert results["generic-api-key"]["level"] in {"warning", "note"}
 
 
 def test_locations_and_fingerprints_are_present(sarif):
-    result = next(r for r in sarif["runs"][0]["results"] if r["ruleId"] == "aws-access-key")
+    result = next(
+        r for r in sarif["runs"][0]["results"] if r["ruleId"] == "aws-access-key/critical"
+    )
     location = result["locations"][0]["physicalLocation"]
 
     assert location["artifactLocation"]["uri"] == "src/example_config.py"
@@ -80,7 +82,9 @@ def test_locations_and_fingerprints_are_present(sarif):
 
 
 def test_result_properties_carry_triage_context(sarif):
-    result = next(r for r in sarif["runs"][0]["results"] if r["ruleId"] == "aws-access-key")
+    result = next(
+        r for r in sarif["runs"][0]["results"] if r["ruleId"] == "aws-access-key/critical"
+    )
 
     assert result["properties"]["playbook"] == "aws-access-key"
     assert result["properties"]["detectorRule"] == "gitleaks:aws-access-token"
@@ -111,12 +115,12 @@ def test_a_waived_finding_is_suppressed_not_dropped(catalog):
     )
     sarif = build_sarif(outcome, catalog=catalog, version=__version__)
 
-    aws = next(r for r in sarif["runs"][0]["results"] if r["ruleId"] == "aws-access-key")
+    aws = next(r for r in sarif["runs"][0]["results"] if r["ruleId"] == "aws-access-key/critical")
     assert aws["suppressions"] == [
         {"kind": "external", "justification": "secguard waiver WV-2026-001"}
     ]
 
-    others = [r for r in sarif["runs"][0]["results"] if r["ruleId"] != "aws-access-key"]
+    others = [r for r in sarif["runs"][0]["results"] if r["ruleId"] != "aws-access-key/critical"]
     assert all("suppressions" not in result for result in others)
 
 
