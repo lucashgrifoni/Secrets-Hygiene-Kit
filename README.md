@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/lucashgrifoni/secrets-hygiene-kit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/lucashgrifoni/secrets-hygiene-kit/actions/workflows/ci.yml)
 
-[0.3.0 beta](https://github.com/lucashgrifoni/secrets-hygiene-kit/releases/tag/v0.3.0)
+[0.4.0 beta](https://github.com/lucashgrifoni/secrets-hygiene-kit/releases/tag/v0.4.0)
 · Python 3.12 / 3.13 / 3.14 · [Apache-2.0](LICENSE)
 
 **Turn secret-scanner reports into consistent CI decisions and response guidance.**
@@ -14,7 +14,7 @@ applies expiring exceptions and produces reports that reviewers can act on.
 Detection runs in your scanner. Credential changes remain with the authorized
 responder. secguard processes reports locally and never contacts a credential provider.
 
-[Install](#install-030) · [Quickstart](#quickstart) · [CLI](#cli-reference) ·
+[Install](#install-040) · [Quickstart](#quickstart) · [CLI](#cli-reference) ·
 [CI integration](#ci-integration) · [Documentation](#documentation)
 
 ## What it does
@@ -26,17 +26,19 @@ responder. secguard processes reports locally and never contacts a credential pr
 | Enforce exception policy | Expiring waivers, partial-scope notices and a blocking decision for expired waivers |
 | Evaluate a CI threshold | Predictable exit codes for passing, blocking and processing errors |
 | Export review artifacts | JSON, SARIF 2.1.0, Markdown and a PR comment draft |
+| Publish a PR summary | Optional counts-only comment with trusted repository checks and idempotent updates |
+| Hand off remediation | An active-only exchange and an opt-in bridge to AppSec Remediation Hub |
 | Support incident response | 13 provider and secret-type playbooks, incident checklists and review-date checks |
 | Set up a repository | Pre-commit and GitHub/GitLab CI starters that preserve existing files |
 
-The adapters also accept synthetic reports for testing. secguard writes report
-files and comment drafts; your workflow controls their upload or publication.
+The adapters also accept synthetic reports for testing. Files are written locally.
+Automatic PR publication requires explicit configuration in the composite action.
 
-## Install 0.3.0
+## Install 0.4.0
 
-The current release is **0.3.0 beta**, tested on Linux and Windows with
+The current release is **0.4.0 beta**, tested on Linux and Windows with
 Python **3.12, 3.13 and 3.14**. Install the versioned wheel from
-[GitHub Releases](https://github.com/lucashgrifoni/secrets-hygiene-kit/releases/tag/v0.3.0).
+[GitHub Releases](https://github.com/lucashgrifoni/secrets-hygiene-kit/releases/tag/v0.4.0).
 
 Create a virtual environment:
 
@@ -47,18 +49,18 @@ python -m venv .venv
 ### Linux
 
 ```console
-.venv/bin/python -m pip install https://github.com/lucashgrifoni/secrets-hygiene-kit/releases/download/v0.3.0/secrets_hygiene_kit-0.3.0-py3-none-any.whl
+.venv/bin/python -m pip install https://github.com/lucashgrifoni/secrets-hygiene-kit/releases/download/v0.4.0/secrets_hygiene_kit-0.4.0-py3-none-any.whl
 .venv/bin/secguard version
 ```
 
 ### Windows
 
 ```console
-.\.venv\Scripts\python.exe -m pip install https://github.com/lucashgrifoni/secrets-hygiene-kit/releases/download/v0.3.0/secrets_hygiene_kit-0.3.0-py3-none-any.whl
+.\.venv\Scripts\python.exe -m pip install https://github.com/lucashgrifoni/secrets-hygiene-kit/releases/download/v0.4.0/secrets_hygiene_kit-0.4.0-py3-none-any.whl
 .\.venv\Scripts\secguard.exe version
 ```
 
-The version command prints `0.3.0`. In the examples below, replace `secguard`
+The version command prints `0.4.0`. In the examples below, replace `secguard`
 with `.venv/bin/secguard` on Linux or `.\.venv\Scripts\secguard.exe` on Windows,
 or activate that virtual environment first.
 
@@ -125,6 +127,7 @@ exceptions and troubleshooting.
 | --- | --- |
 | `secguard init [dir] --ci github\|gitlab\|both\|none` | Create policy, pre-commit and optional CI starters |
 | `secguard scan check --input FILE [--input FILE]` | Combine reports, apply waivers and enforce the threshold |
+| `secguard scan check --input FILE --remediation FILE --repository owner/repo` | Export active findings for remediation, preserving the gate decision |
 | `secguard scan normalize --input FILE` | Export canonical findings as JSON |
 | `secguard report --input FILE [--input FILE]` | Render Markdown without a finding threshold |
 | `secguard waivers check\|list\|add` | Validate, inspect or add expiring exceptions |
@@ -171,14 +174,14 @@ Use the [waiver request template](docs/waiver-request-template.md) to document a
 
 The composite action installs secguard from the selected revision and evaluates
 existing reports. Add these steps after checking out your repository and installing
-a reviewed Gitleaks version. The action is pinned to the `v0.3.0` release commit:
+a reviewed Gitleaks version. Use a reviewed commit to pin the action:
 
 ```yaml
 - name: Collect Gitleaks report
   run: gitleaks git --redact --exit-code 0 --report-format json --report-path gitleaks.json
 
 - name: Evaluate secret findings
-  uses: lucashgrifoni/secrets-hygiene-kit@52cca0f5c203cf2ddaabbbe89007161229cf476f # v0.3.0
+  uses: lucashgrifoni/secrets-hygiene-kit@143148bec7ed35187152d350b4122307c24afd59 # v0.4.0
   with:
     reports: gitleaks.json
     fail-on: high
@@ -194,6 +197,12 @@ The action skips individual missing paths and fails if no listed report exists.
 
 See [action.yml](action.yml) for inputs, output paths and the playbook freshness check.
 
+To publish summaries, explicitly enable `publish-pr-comment` and configure a
+fixed `comment-repository` in a trusted same-repository PR job. The publisher
+posts counts, the gate decision and a run link; it updates its own marker comment.
+Publication preserves a blocking gate. See [PR comments](docs/pr-comments.md)
+for permissions, fork restrictions and failure handling.
+
 ### GitLab CI
 
 ```console
@@ -203,6 +212,22 @@ secguard init . --ci gitlab
 This generates `.gitlab/secguard.gitlab-ci.yml`, an includable GitLab snippet.
 Configure and install the scanner steps before using it; the generated detector
 examples are comments.
+
+## Remediation handoff
+
+```console
+secguard scan check --input gitleaks.json --remediation remediation.json --repository acme/example
+```
+
+The `secguard.remediation/v1` exchange contains active findings, their resolved
+severity, occurrence fingerprints, locations and response playbooks. Waived
+findings are omitted, and the gate decision is retained. Free-text messages,
+waiver reasons and native detector digests are excluded.
+
+The packaged bridge validates AppSec Remediation Hub models, optionally imports
+into an explicitly selected local database, and generates GitHub issue payloads
+for review. See [Remediation Hub](docs/remediation-hub.md) for the validated
+consumer version, preview mode and reimport behavior.
 
 ## Classification and response
 
@@ -248,6 +273,7 @@ metadata. Review exported reports before sharing them.
 | Limit | Effect |
 | --- | --- |
 | 64 MiB per input report | Larger reports exit with a processing error before JSON parsing; use smaller repository scopes |
+| 16 MiB / 10,000 findings per remediation exchange | Oversized handoffs fail before any scan output is written; use smaller repository scopes |
 | In-memory parsing | The input limit does not impose an aggregate memory limit on parsing or combined findings |
 | Type, path and line matching | Different reported lines can produce separate findings; location-derived detect-secrets fingerprints change when code moves |
 | Filesystem write guards | Symlinks and Windows junctions are checked; concurrent destination changes remain outside the guarantee |
@@ -265,6 +291,9 @@ severity suffixes; see the [migration notes](CHANGELOG.md#migration-notes).
 | [Incident response](docs/incident-flow.md) | Containment, rotation and closure guidance |
 | [Adding a playbook](docs/adding-playbook.md) | Extending response guidance and rule mappings |
 | [Waiver request](docs/waiver-request-template.md) | Recording an exception for review |
+| [PR comments](docs/pr-comments.md) | Trusted publication, permissions and idempotent summaries |
+| [Remediation Hub](docs/remediation-hub.md) | Active-only exchange, local import and issue preview |
+| [Detector compatibility](docs/detector-compatibility.md) | Fixed producer versions, fixture provenance and reproduction |
 | [Changelog](CHANGELOG.md) | Release changes and migration notes |
 | [Project status](STATUS.md) | Current scope and known limitations |
 
