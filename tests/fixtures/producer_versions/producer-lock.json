@@ -1,0 +1,96 @@
+{
+  "binaries": {
+    "gitleaks": {
+      "binary_sha256": "17157e2ee8b76fc8b1d8bee607a250e34b8a8023c8bc81822d4b5ee4d78fcb7c",
+      "download_url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_windows_x64.zip",
+      "filename": "gitleaks_8.30.1_windows_x64.zip",
+      "platform": "windows-amd64",
+      "sha256": "d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e",
+      "signature_verified": false,
+      "source": "https://github.com/gitleaks/gitleaks/releases/tag/v8.30.1",
+      "upstream_checksum_file_match": true,
+      "upstream_digest_match": true,
+      "version": "8.30.1"
+    },
+    "trufflehog": {
+      "binary_sha256": "a1825a8b0feb00a0a3a2b1fed765fdde4d0d65c9e775adb91ff5be15170ec5db",
+      "download_url": "https://github.com/trufflesecurity/trufflehog/releases/download/v3.97.9/trufflehog_3.97.9_windows_amd64.tar.gz",
+      "filename": "trufflehog_3.97.9_windows_amd64.tar.gz",
+      "platform": "windows-amd64",
+      "sha256": "7436c13a12f378738db1b65803b00fa3b816db3dc28084e52b9a377c6b12901d",
+      "signature_verified": false,
+      "source": "https://github.com/trufflesecurity/trufflehog/releases/tag/v3.97.9",
+      "upstream_checksum_file_match": true,
+      "upstream_digest_match": true,
+      "version": "3.97.9"
+    }
+  },
+  "checked_on": "2026-10-05",
+  "dependency_scope": "Isolated fixture producer environment; not secguard runtime dependencies",
+  "detect_secrets_wheels": [
+    {
+      "download_url": "https://files.pythonhosted.org/packages/0b/a7/71ac2cff56fec219ed242bb11b8efb69fcc4bec75db06fb7bfe35de520e6/certifi-2026.7.22-py3-none-any.whl",
+      "filename": "certifi-2026.7.22-py3-none-any.whl",
+      "package": "certifi",
+      "sha256": "62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775",
+      "source": "https://pypi.org/pypi/certifi/2026.7.22/json",
+      "upstream_digest_match": true,
+      "version": "2026.7.22"
+    },
+    {
+      "download_url": "https://files.pythonhosted.org/packages/eb/e6/e6e083884cbcfd49c64865af05027fe7011be7b2d9179524f099a1b611f3/charset_normalizer-3.5.2-cp312-cp312-win_amd64.whl",
+      "filename": "charset_normalizer-3.5.2-cp312-cp312-win_amd64.whl",
+      "package": "charset-normalizer",
+      "sha256": "780fbe7cab297b81dad9fb8dc5eb003c0468ffb0d9e5f65068c53a34661a96bc",
+      "source": "https://pypi.org/pypi/charset-normalizer/3.5.2/json",
+      "upstream_digest_match": true,
+      "version": "3.5.2"
+    },
+    {
+      "download_url": "https://files.pythonhosted.org/packages/4e/5e/4f5fe4b89fde1dc3ed0eb51bd4ce4c0bca406246673d370ea2ad0c58d747/detect_secrets-1.5.0-py3-none-any.whl",
+      "filename": "detect_secrets-1.5.0-py3-none-any.whl",
+      "package": "detect-secrets",
+      "sha256": "e24e7b9b5a35048c313e983f76c4bd09dad89f045ff059e354f9943bf45aa060",
+      "source": "https://pypi.org/pypi/detect-secrets/1.5.0/json",
+      "upstream_digest_match": true,
+      "version": "1.5.0"
+    },
+    {
+      "download_url": "https://files.pythonhosted.org/packages/58/a2/bb081bab032533a855d44de1d56f8e8426114ff1ba5d1f07a438a0a654f8/idna-3.20-py3-none-any.whl",
+      "filename": "idna-3.20-py3-none-any.whl",
+      "package": "idna",
+      "sha256": "ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c",
+      "source": "https://pypi.org/pypi/idna/3.20/json",
+      "upstream_digest_match": true,
+      "version": "3.20"
+    },
+    {
+      "download_url": "https://files.pythonhosted.org/packages/86/bf/899e81e4cce32febab4fb42bb97dcdf66bc135272882d1987881a4b519e9/pyyaml-6.0.3-cp312-cp312-win_amd64.whl",
+      "filename": "pyyaml-6.0.3-cp312-cp312-win_amd64.whl",
+      "package": "PyYAML",
+      "sha256": "5fcd34e47f6e0b794d17de1b4ff496c00986e1c83f7ab2fb8fcfe9616ff7477b",
+      "source": "https://pypi.org/pypi/PyYAML/6.0.3/json",
+      "upstream_digest_match": true,
+      "version": "6.0.3"
+    },
+    {
+      "download_url": "https://files.pythonhosted.org/packages/a0/f4/c67b0b3f1b9245e8d266f0f112c500d50e5b4e83cb6f3b71b6528104182a/requests-2.34.2-py3-none-any.whl",
+      "filename": "requests-2.34.2-py3-none-any.whl",
+      "package": "requests",
+      "sha256": "2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0",
+      "source": "https://pypi.org/pypi/requests/2.34.2/json",
+      "upstream_digest_match": true,
+      "version": "2.34.2"
+    },
+    {
+      "download_url": "https://files.pythonhosted.org/packages/92/9d/c4e665119135114480843e7ab388fa94d8480650450e6f8e26b70d323a4c/urllib3-2.8.0-py3-none-any.whl",
+      "filename": "urllib3-2.8.0-py3-none-any.whl",
+      "package": "urllib3",
+      "sha256": "0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3",
+      "source": "https://pypi.org/pypi/urllib3/2.8.0/json",
+      "upstream_digest_match": true,
+      "version": "2.8.0"
+    }
+  ],
+  "schema": "secguard.producer-lock/v1"
+}

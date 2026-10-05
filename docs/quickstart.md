@@ -1,6 +1,6 @@
 # Quickstart
 
-Install the versioned wheel using the [README](../README.md#install-030).
+Install the versioned wheel using the [README](../README.md#install-040).
 Use the virtual environment's executable for every command below.
 
 ## 1. Create the starter files
@@ -55,8 +55,13 @@ the CLI's `verified=live` label refers to that imported report claim.
 secguard scan check --input gitleaks.json --json findings.json --sarif secguard.sarif --markdown report.md --pr-comment comment.md
 ```
 
-These options write files. Upload SARIF and post comment drafts through your
-own authorized workflow; secguard does neither automatically.
+These options write files. Upload SARIF through your workflow. For optional
+automatic PR summaries, configure the composite action as described in
+[PR comments](pr-comments.md).
+
+To hand off active findings, add `--remediation remediation.json --repository
+acme/example`. The [Hub bridge](remediation-hub.md) validates the exchange and
+offers a local import plus GitHub issue preview.
 
 SARIF rules identify the canonical type, with a severity suffix for overrides.
 Waived findings remain visible as suppressions. Review sensitive metadata

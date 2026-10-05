@@ -40,6 +40,7 @@ from secguard.core.playbooks import (
 )
 from secguard.core.reconcile import EXIT_GATE_FAILED, FAIL_ON_CHOICES, ScanOutcome, reconcile
 from secguard.core.redaction import sanitize_text
+from secguard.core.remediation import build_remediation_document, serialize_remediation_document
 from secguard.core.sarif import build_sarif, waiver_summary
 from secguard.core.scaffold import CiProvider, InitError, initialize_project
 from secguard.core.waivers import (
@@ -489,6 +490,14 @@ def scan_check(
         Path | None,
         typer.Option("--pr-comment", help="Write a compact pull-request comment here."),
     ] = None,
+    remediation_output: Annotated[
+        Path | None,
+        typer.Option("--remediation", help="Write an active-only remediation exchange here."),
+    ] = None,
+    repository: Annotated[
+        str | None,
+        typer.Option("--repository", help="Owner/name for --remediation; explicitly required."),
+    ] = None,
     rules: Annotated[
         Path | None,
         typer.Option("--rules", help=RULES_HELP),
@@ -501,6 +510,8 @@ def scan_check(
     """Reconcile scanner reports against waivers and fail when the gate blocks."""
     if fail_on not in FAIL_ON_CHOICES:
         raise typer.BadParameter(f"--fail-on must be one of: {', '.join(FAIL_ON_CHOICES)}")
+    if (remediation_output is None) != (repository is None):
+        raise typer.BadParameter("--remediation and --repository must be provided together")
 
     resolved_inputs = _require_inputs(inputs)
     catalog = _load_catalog(rules)
@@ -512,6 +523,16 @@ def scan_check(
         today=check_date,
         fail_on=fail_on,
     )
+
+    remediation_content = None
+    if remediation_output is not None:
+        try:
+            remediation_document = build_remediation_document(
+                outcome, repository=repository or "", version=__version__
+            )
+            remediation_content = serialize_remediation_document(remediation_document)
+        except FindingError as exc:
+            raise _fail(str(exc)) from exc
 
     if json_output is not None:
         _write_output(
@@ -533,6 +554,8 @@ def scan_check(
             comment_output,
             report_renderer.render_pr_comment(outcome, generated_on=check_date),
         )
+    if remediation_output is not None and remediation_content is not None:
+        _write_output(remediation_output, remediation_content)
 
     _print_scan_summary(outcome, check_date)
 

@@ -23,5 +23,14 @@ secguard.sarif
 secguard-report.md
 secguard-comment.md
 
+# Local remediation exchanges, tracker previews, and Hub databases.
+/remediation.json
+/github-issues.json
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+
 # Local operational evidence and improvement lifecycle.
 /melhorias/

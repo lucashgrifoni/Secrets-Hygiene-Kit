@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "secrets-hygiene-kit"
-version = "0.3.0"
+version = "0.4.0"
 description = "secguard: normalize secret-scanner reports, enforce waiver lifecycle, and run leak response playbooks."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -33,7 +33,7 @@ dev = [
   # `python -m build` to prove a new playbook survives packaging, and the only
   # documented dev setup is this extra.
   "build>=1.2,<2",
-  "pytest>=8.2,<9",
+  "pytest>=8.2,<10",
   "ruff>=0.5,<1",
 ]
 

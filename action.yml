@@ -53,6 +53,22 @@ inputs:
     description: "Where to write the compact pull-request comment. Empty disables it."
     required: false
     default: "secguard-comment.md"
+  publish-pr-comment:
+    description: "Publish a counts-only PR summary after PASS or BLOCK. Requires explicit trusted-repository configuration and a write token."
+    required: false
+    default: "false"
+  comment-repository:
+    description: "Trusted owner/repository allowed to receive comments. Set a fixed literal in the workflow."
+    required: false
+    default: ""
+  comment-marker:
+    description: "Comment namespace for this gate, using lowercase letters, digits, underscores, or hyphens."
+    required: false
+    default: "secguard"
+  comment-author:
+    description: "Bot login that owns the marker comment. The API must confirm its identity."
+    required: false
+    default: "github-actions[bot]"
   check-playbooks:
     description: "Also fail when a packaged playbook is past its review window."
     required: false
@@ -69,6 +85,12 @@ outputs:
   reports-found:
     description: "Number of scanner reports that were actually present."
     value: ${{ steps.collect.outputs.count }}
+  comment-status:
+    description: "created, updated, unchanged, or not-published. Empty when publishing is disabled."
+    value: ${{ steps.publish.outputs.status }}
+  comment-id:
+    description: "Numeric ID of the confirmed PR comment. Empty when no comment was published."
+    value: ${{ steps.publish.outputs.comment-id }}
 
 runs:
   using: "composite"
@@ -187,3 +209,24 @@ runs:
         fi
         echo "::error title=secguard::No scanner report was found, so nothing was gated."
         exit 1
+
+    # Publishing runs after a completed gate, including BLOCK. It cannot turn
+    # a failed gate into a pass; its own failure also fails the Action.
+    - name: Publish the compact PR summary
+      id: publish
+      if: always() && !cancelled() && inputs.publish-pr-comment != 'false'
+      shell: bash
+      env:
+        SECGUARD_ACTION_PATH: ${{ github.action_path }}
+        SECGUARD_PUBLISH_COMMENT: ${{ inputs.publish-pr-comment }}
+        SECGUARD_COMMENT_FILE: ${{ inputs.comment-output }}
+        SECGUARD_EXPECTED_REPOSITORY: ${{ inputs.comment-repository }}
+        SECGUARD_COMMENT_MARKER: ${{ inputs.comment-marker }}
+        SECGUARD_COMMENT_AUTHOR: ${{ inputs.comment-author }}
+        SECGUARD_VERDICT: ${{ steps.gate.outputs.verdict }}
+        SECGUARD_REPORTS_FOUND: ${{ steps.collect.outputs.count }}
+        SECGUARD_PR_NUMBER: ${{ github.event.pull_request.number }}
+        SECGUARD_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        SECGUARD_PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+        SECGUARD_TOKEN: ${{ github.token }}
+      run: python -I "$SECGUARD_ACTION_PATH/scripts/post_pr_comment.py"

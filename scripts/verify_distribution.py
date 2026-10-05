@@ -143,17 +143,47 @@ def smoke(cli: Path, project: Path, version: str) -> None:
         "blocked.md",
         "--pr-comment",
         "comment.md",
+        "--remediation",
+        "remediation.json",
+        "--repository",
+        "acme/distribution-smoke",
         expected=1,
     )
     if "BLOCK" not in blocked:
         raise RuntimeError("blocking exit code did not contain a BLOCK verdict")
     invoke("scan", "check", "--input", "invalid.json", "--fail-on", "high", expected=2)
-    for name in ("blocked.sarif", "blocked.md", "comment.md"):
+    for name in ("blocked.sarif", "blocked.md", "comment.md", "remediation.json"):
         if CANARY in (project / name).read_text(encoding="utf-8"):
             raise RuntimeError(f"secret canary leaked into {name}")
     sarif = json.loads((project / "blocked.sarif").read_text(encoding="utf-8"))
     if not sarif["runs"][0]["results"]:
         raise RuntimeError("blocking fixture produced no SARIF finding")
+    exchange = json.loads((project / "remediation.json").read_text(encoding="utf-8"))
+    if (
+        exchange["schema"] != "secguard.remediation/v1"
+        or exchange["gate"]["decision"] != "BLOCK"
+        or len(exchange["findings"]) != 1
+    ):
+        raise RuntimeError("installed remediation export did not preserve the blocking finding")
+    python = cli.with_name("python.exe" if os.name == "nt" else "python")
+    run([str(python), "-m", "secguard.integrations.remediation_hub", "--help"], project)
+    run(
+        [
+            str(python),
+            "-m",
+            "secguard.integrations.remediation_hub",
+            "--input",
+            "remediation.json",
+            "--database",
+            "unused.sqlite",
+            "--issues-output",
+            "unused-issues.json",
+        ],
+        project,
+        expected=2,
+    )
+    if (project / "unused.sqlite").exists() or (project / "unused-issues.json").exists():
+        raise RuntimeError("missing Hub dependency did not fail without side effects")
 
 
 def verify(dist: Path, requirements_output: Path | None) -> None:
