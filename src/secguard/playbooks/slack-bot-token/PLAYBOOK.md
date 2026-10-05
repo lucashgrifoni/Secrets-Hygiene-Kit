@@ -1,37 +1,45 @@
 # Slack Bot or User Token Leak Playbook
 
-Vetted: 2026-08-04
+Vetted: 2026-10-05
 
 ## Scope
 
 Use this playbook when a Slack bot token (`xoxb-`), user token (`xoxp-`), app-level token
-(`xapp-`), or configuration access token is exposed. These tokens read and post as the app or
-the user, so the exposure is both a data-access and an impersonation problem.
+(`xapp-`), or configuration access token is exposed. Bot and user tokens act within their
+granted scopes; app-level and configuration tokens serve different app or management
+functions. Classify the token before choosing containment.
 
 Do not paste the token into tickets or channels.
 
 ## Identify
 
 - Record the repository path, commit hash, detector rule, timestamp, and redacted token
-  prefix. The prefix tells you the token class and therefore the blast radius.
+  prefix. Confirm its class, scopes, installation, and any associated refresh credentials;
+  the prefix alone does not establish permissions.
 - Identify the workspace, the app, the app owner, and the granted OAuth scopes.
-- A user token inherits that person's access to private channels and DMs; treat it as an
-  account compromise, not only an app issue.
+- A user token's granted scopes and the user's access can include private channels and DMs.
+  Scope the exposure from the actual permissions; token exposure alone does not prove the
+  person's interactive account was compromised.
 - List channels and files the scopes reach.
 
 ## Invalidate
 
-- Revoke the token through the Slack app configuration or the token revocation API.
+- Use Slack's revocation mechanism for the exact token class. OAuth access and refresh
+  tokens have a single-token revocation path; app-level and configuration tokens require
+  their own management controls. Have the app owner confirm the result and escalate if the
+  class-specific revocation path is unclear.
 - For a user token, also review the person's active sessions and consider forcing a re-auth.
 - If the app has broad scopes and abuse is suspected, uninstall the app from the workspace
   while you investigate. Uninstalling invalidates the tokens issued to that installation.
+- With token rotation, revoking one token does not necessarily remove the underlying
+  installation or its other credentials. Revoke exposed refresh credentials and any related
+  active tokens as required by the incident scope.
 
 ## Rotate
 
-- Reinstall the app and issue a replacement token only for the integrations that still need
-  it.
-- Reduce scopes to the minimum the integration uses; most integrations request more than they
-  exercise.
+- Reauthorize or reinstall only when the token class and revocation path require it. Issue a
+  replacement only for integrations that still need it and verify consumer adoption.
+- Reduce scopes to the minimum the integration uses.
 - Enable token rotation for the app if the integration supports refresh tokens.
 - Store the replacement in the approved secret manager or CI/CD variable store.
 
@@ -44,6 +52,9 @@ Do not paste the token into tickets or channels.
   configuration changes.
 - Check whether the token could read private channels or DMs, and scope the notification
   accordingly.
+- Slack's Audit Logs API is an Enterprise feature and does not provide message content or
+  every token operation. Review available channel history or approved content evidence
+  separately; record retention, permissions, pagination, and attribution gaps.
 
 ## Communicate
 
@@ -59,3 +70,10 @@ Do not paste the token into tickets or channels.
 - Add detection for Slack token prefixes in pre-commit and CI.
 - Record residual risk with an owner and a review date, especially when audit logs were not
   available for the full window.
+
+## References
+
+- [Slack token classes](https://docs.slack.dev/authentication/tokens/)
+- [OAuth token revocation](https://docs.slack.dev/reference/methods/auth.revoke/)
+- [Token rotation and uninstall behavior](https://docs.slack.dev/authentication/using-token-rotation/)
+- [Audit Logs availability and coverage](https://docs.slack.dev/admins/audit-logs-api/)

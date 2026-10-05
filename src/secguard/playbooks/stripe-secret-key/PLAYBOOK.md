@@ -1,12 +1,13 @@
 # Stripe Secret Key Leak Playbook
 
-Vetted: 2026-08-04
+Vetted: 2026-10-05
 
 ## Scope
 
 Use this playbook when a Stripe secret key (`sk_live_`, `sk_test_`) or restricted key
-(`rk_live_`, `rk_test_`) is exposed. A live secret key can move money, read customer data,
-and change account configuration, so this is a financial and a privacy incident at once.
+(`rk_live_`, `rk_test_`) is exposed. A live secret key can enable financial operations and
+customer-data access; restricted keys depend on their permissions and access policies.
+Treat exposure as a potential compromise and assess the financial and privacy impact.
 
 Check the prefix before escalating: a `_test_` key touches test-mode data only, which changes
 the severity but not the need to rotate.
@@ -24,10 +25,13 @@ Do not paste the key into tickets or chat.
 
 ## Invalidate
 
-- Roll the key in the Stripe dashboard. Rolling issues a replacement and lets you set an
-  expiry for the old key, so you can contain without an immediate outage.
-- Choose an immediate expiry when the repository was public or abuse is suspected; accept a
-  short grace window only when exposure was clearly internal.
+- Rotate the exposed key promptly in the Stripe dashboard. Select immediate expiry for
+  urgent containment; a grace period leaves the old key usable until expiry.
+- Any staged migration needs account-owner approval, a short deadline, and consumer
+  adoption evidence before the exposed key expires. Internal exposure also warrants
+  immediate response; do not treat repository visibility as proof that no one obtained it.
+- Confirm the old key is expired or revoked in Stripe. A replacement in the credential
+  store alone does not establish containment.
 - Escalate to the account owner if you lack permission to roll keys. Do not delay containment
   waiting for the original developer.
 
@@ -36,7 +40,8 @@ Do not paste the key into tickets or chat.
 - Store the replacement in the approved secret manager or CI/CD variable store.
 - Prefer restricted keys scoped to the specific resources the integration uses instead of a
   full secret key.
-- Redeploy or restart every consumer so no process keeps the old key.
+- Apply each consumer's reload contract, restarting or redeploying when needed, and verify
+  authenticated operations with the replacement.
 - Verify webhooks and background jobs, which are the usual places an old key survives a
   rotation.
 
@@ -48,6 +53,9 @@ Do not paste the key into tickets or chat.
   invitations, and bank account changes.
 - Check for customer or payment-method reads that suggest data harvesting rather than fraud.
 - Reconcile balance and payout activity with finance for the full window.
+- Use the key's request-log view for attribution and review account changes separately where
+  evidence is available. Record mode, account, permissions, retention, and interval gaps;
+  events and request logs do not prove every administrative action was captured.
 
 ## Communicate
 
@@ -63,3 +71,9 @@ Do not paste the key into tickets or chat.
 - Move the integration to restricted keys if it was using a full secret key.
 - Record residual risk with an owner and a review date, including the outcome of the financial
   reconciliation.
+
+## References
+
+- [Stripe key types, rotation, expiry, and key request logs](https://docs.stripe.com/keys)
+- [Response to exposed Stripe keys](https://docs.stripe.com/keys-best-practices)
+- [Workbench request and event coverage](https://docs.stripe.com/workbench/overview)

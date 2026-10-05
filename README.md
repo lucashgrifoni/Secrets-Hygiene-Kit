@@ -1,208 +1,192 @@
 # Secrets Hygiene Kit
 
-**gitleaks tells you a secret leaked. `secguard` tells you what to do about it.**
+`secguard` turns secret-scanner reports into a build decision and a response checklist.
+It combines findings from Gitleaks, TruffleHog and detect-secrets, applies expiring
+waivers, and exports JSON, SARIF or Markdown for review.
 
-Secret scanners are good at detection and silent about response. Each provider
-has a different revocation path, every team improvises the first thirty minutes,
-and accepted exceptions quietly become permanent. `secguard` closes that gap: it
-normalizes detector reports into one canonical finding set, applies a waiver
-lifecycle that actually expires, and hands the responder a provider-specific
-checklist.
+Detection runs in your scanner. Credential changes remain with the authorized
+responder. secguard reads reports and never contacts a credential provider.
+
+## Install 0.3.0
+
+Use Python 3.12, 3.13 or 3.14 on Linux or Windows.
+
+Create a virtual environment and install the versioned wheel from the
+[0.3.0 release](https://github.com/lucashgrifoni/secrets-hygiene-kit/releases/tag/v0.3.0):
 
 ```console
-$ secguard scan check --input gitleaks.json --input trufflehog.jsonl --fail-on high
-5 finding(s): 5 active, 0 waived, threshold=high, date=2026-08-04
-- critical  aws-access-key  src/example_config.py:12  rule=gitleaks:aws-access-token  playbook=aws-access-key verified=live
-- high      postgres-uri    infra/db.tf:5             rule=trufflehog:Postgres        playbook=postgres-uri
-- medium    slack-webhook   docs/example.env:4        rule=gitleaks:slack-webhook-url playbook=slack-webhook
-BLOCK: 2 finding(s) at or above high
-
-$ secguard incident start --secret-type aws-access-key --leaked-via public-github-issue
-# Incident checklist: AWS Access Key Leak Playbook
-...
-## Invalidate
-- [ ] Deactivate the exposed access key through IAM before relying on source cleanup.
+python -m venv .venv
 ```
 
-## Scope
+On Linux:
 
-| secguard does | secguard does not |
+```console
+.venv/bin/python -m pip install https://github.com/lucashgrifoni/secrets-hygiene-kit/releases/download/v0.3.0/secrets_hygiene_kit-0.3.0-py3-none-any.whl
+.venv/bin/secguard version
+```
+
+On Windows:
+
+```console
+.venv\Scripts\python.exe -m pip install https://github.com/lucashgrifoni/secrets-hygiene-kit/releases/download/v0.3.0/secrets_hygiene_kit-0.3.0-py3-none-any.whl
+.venv\Scripts\secguard.exe version
+```
+
+The release includes a source archive, SHA-256 checksums, a dependency inventory
+and build provenance. The package is distributed through GitHub Releases;
+there is no PyPI release. Use the environment's `secguard` executable for the
+commands below.
+
+## First use
+
+Run your chosen scanner and keep its failure status visible. For example,
+Gitleaks can write findings without using them as its process exit status:
+
+```console
+gitleaks git --redact --exit-code 0 --report-format json --report-path gitleaks.json
+secguard scan check --input gitleaks.json --fail-on high
+```
+
+Gitleaks operational errors still stop the scanner step. Pin and install the
+scanner version your team reviewed separately.
+
+| Exit | Meaning |
 | --- | --- |
-| read gitleaks, trufflehog, and detect-secrets reports | run any scanner |
-| normalize them into one canonical, dedup'd finding set | detect secrets itself |
-| enforce a waiver lifecycle that fails closed on expiry | permanently silence a rule |
-| decide block or pass, and emit SARIF, JSON, and Markdown | upload results for you |
-| print provider-specific response checklists | revoke, rotate, or mutate provider state |
+| `0` | no active finding reached the threshold and no waiver expired |
+| `1` | findings or expired waivers blocked the gate |
+| `2` | input, policy or output could not be processed |
 
-Detection stays with the tool your team already trusts. secguard never pins,
-ships, or executes a scanner binary, which keeps it out of your supply chain and
-makes every adapter deterministically testable.
+A clean report is evidence about that scanner run and its scope. It does not
+prove the repository contains no secrets. Empty TruffleHog output is accepted
+with a notice; the preceding scanner step must succeed.
 
-Response stays with a human. A tool that revokes credentials automatically is a
-tool that takes production down at 3am on a false positive.
+See the [quickstart](docs/quickstart.md) for setup, report formats and CI.
 
-## Install
+## Capabilities
 
-```bash
-python -m pip install secrets-hygiene-kit
-secguard init .
-```
+- Read Gitleaks JSON, TruffleHog JSON/JSON Lines, detect-secrets baselines and
+  synthetic test reports.
+- Map detector rules to 13 canonical secret types and response playbooks.
+- Combine findings at the same type, path and line, preserving the strongest
+  severity and each contributing detector rule.
+- Require every contributing rule to be covered before a waiver suppresses
+  a combined finding.
+- Block on expired waivers and warn about unused or partial scopes.
+- Export JSON, SARIF 2.1.0, a Markdown report or a PR comment draft.
+- Create pre-commit and CI starters without overwriting existing files.
+- Print response checklists and check playbook review dates.
 
-Start at [docs/quickstart.md](docs/quickstart.md).
-
-## How it works
-
-```text
-gitleaks.json  ─┐
-trufflehog.jsonl├─> normalize ─> classify ─> merge ─> reconcile ─> gate ─> SARIF / JSON / Markdown
-.secrets.baseline┘   (redact)   (catalog)  (dedup)   (waivers)              incident checklist
-```
-
-**Normalize.** Each adapter reads an explicit allowlist of metadata keys and
-ignores everything else, so gitleaks `Secret` and `Match`, trufflehog `Raw` and
-`RawV2`, detect-secrets `hashed_secret`, commit messages, and author emails
-never enter the pipeline. The canonical model has no field that could hold them.
-
-**Classify.** A rule catalog maps `gitleaks:aws-access-token` to the canonical
-secret type `aws-access-key`, a default severity, and the playbook that
-describes the response. An unmapped rule falls back to the generic playbook and
-is flagged `mapping: fallback` rather than silently presented as a confident
-match.
-
-**Merge.** The same leak found by three scanners becomes one finding at the
-highest severity any of them assigned, listing the others as corroborating
-evidence. In SARIF that means one alert, not three.
-
-**Reconcile.** Findings meet the waiver file. An expired waiver suppresses
-nothing and fails the gate on its own.
-
-**Gate.** Exit `0` clean, `1` blocked on purpose, `2` bad input.
-
-## Commands
-
-| Command | What it does |
+| Command | Purpose |
 | --- | --- |
-| `secguard init [dir] --ci github\|gitlab\|both\|none` | scaffold waivers, pre-commit, and CI, never overwriting by default |
-| `secguard scan check --input FILE...` | merge reports, apply waivers, decide block or pass |
-| `secguard scan normalize --input FILE` | one report to canonical JSON, no gate |
-| `secguard report --input FILE...` | Markdown report without failing the build |
-| `secguard waivers check \| list \| add` | the exception lifecycle |
-| `secguard playbooks list \| show \| check` | response guidance and its freshness |
-| `secguard incident start --secret-type TYPE` | tickable response checklist |
+| `secguard init [dir] --ci github\|gitlab\|both\|none` | create starter files |
+| `secguard scan check --input FILE...` | combine reports and enforce the gate |
+| `secguard scan normalize --input FILE` | export canonical findings |
+| `secguard report --input FILE...` | write a report without a finding threshold |
+| `secguard waivers check\|list\|add` | manage expiring exceptions |
+| `secguard playbooks list\|show\|check` | inspect response guidance |
+| `secguard incident start --secret-type TYPE` | generate an incident checklist |
 
-## Waivers that expire for real
+## Exception policy
 
 ```yaml
 schema: "secguard.waiver/v1"
 waivers:
   - id: WV-2026-001
-    rule: secret-type:aws-access-key      # or gitleaks:aws-access-token, or gitleaks:*
-    path: tests/fixtures/**               # git-style globs: * stays in one segment
-    reason: "Synthetic value in a detector fixture, not a credential."
-    owner: appsec@example.com
+    rule: secret-type:aws-access-key
+    path: tests/fixtures/**
+    reason: "Synthetic detector fixture, not a credential."
+    owner: appsec@example.invalid
     expires_at: 2026-11-01
     approver: security-lead
 ```
 
-Three properties keep this from becoming a parking lot:
+A waiver records an owner and approver; secguard does not authenticate them or
+replace your review process. Protect the waiver file in your repository.
 
-- **Expiry is enforced, not decorative.** Past `expires_at`, the waiver stops
-  suppressing findings *and* fails the gate on its own, so a stale exception
-  cannot hide behind code that moved.
-- **Scope is narrow by construction.** `*` matches inside one path segment;
-  crossing directories takes an explicit `**`. `fnmatch` would have let `src/*`
-  silently mean "everything under src, recursively".
-- **New waivers are bounded.** `waivers add` rejects an expiry in the past or
-  more than 365 days out, and warns past 90 days.
+`*` stays within a path segment; `**` crosses directories. Expired waivers
+suppress nothing and block the gate even if they match no current finding.
+New waivers created through the CLI must expire in the future within 365 days;
+expiries beyond 90 days produce a warning.
 
-Targeting `secret-type:` instead of a detector rule means the waiver survives a
-scanner renaming its rules.
+Detector-scoped waivers must collectively cover every rule in a combined
+finding. A canonical `secret-type:` scope covers the type across detectors
+and requires review of the added evidence.
 
-## Playbooks
+## Classification and severity
 
-Thirteen packaged playbooks, each following the same response shape: identify,
-invalidate, rotate, audit usage, communicate, close.
+The packaged catalog maps reviewed detector rule identifiers. Unmapped rules
+use a generic playbook and carry `mapping: fallback`.
 
-`aws-access-key` · `aws-secret-access-key` · `github-pat` ·
-`github-app-private-key` · `slack-bot-token` · `slack-webhook` ·
-`stripe-secret-key` · `gcp-service-account-json` · `azure-storage-key` ·
-`postgres-uri` · `jwt-signing-key` · `generic-private-key` · `generic-api-key`
+A TruffleHog `Verified: true` field raises severity to Critical. This imports
+the detector's claim at scan time; secguard performs no fresh verification.
 
-Every playbook carries a `Vetted:` date, and `secguard playbooks check` exits
-`1` once one passes its review window. Vendor consoles change; guidance nobody
-has reviewed in a year gets followed with misplaced confidence mid-incident.
+Catalog overrides can lower severity, so they require an explicit `--rules`
+argument and emit a warning for reductions. A file merely present at
+`.secguard/rules.yaml` is not automatically loaded.
 
-Adding your own: [docs/adding-playbook.md](docs/adding-playbook.md).
+```console
+secguard scan check --input gitleaks.json --rules .secguard/rules.yaml
+```
 
-## CI
+## GitHub Action
 
-A composite GitHub Action ships in [action.yml](action.yml):
+The composite action installs this package from its own versioned checkout.
+Reports take one path per line, including paths containing spaces.
 
 ```yaml
-- name: Run gitleaks
-  run: gitleaks detect --report-format json --report-path gitleaks.json || true
+- name: Collect Gitleaks report
+  run: gitleaks git --redact --exit-code 0 --report-format json --report-path gitleaks.json
 
-- uses: lucashgrifoni/secrets-hygiene-kit@v0.2.0
+- uses: lucashgrifoni/secrets-hygiene-kit@v0.3.0
   with:
     reports: gitleaks.json
     fail-on: high
 ```
 
-`secguard init --ci gitlab` writes an includable GitLab snippet instead of
-overwriting `.gitlab-ci.yml`.
+Install a reviewed scanner before the first step. Pin the secguard action to the
+release commit SHA when your dependency policy requires immutable references.
+Missing reports fail by default. `allow-missing-reports: true` explicitly
+permits a run without coverage and reports `NO-REPORTS`, rather than `PASS`.
 
-Both starter workflows request `contents: read` only and leave the detector step
-commented out, so you pin the scanner your team reviewed rather than inheriting
-one from this project.
+`secguard init --ci gitlab` produces an includable GitLab snippet. The starter
+scanner steps are comments for your team to configure.
 
-## Extending the rule catalog
+## Response playbooks
 
-Detector rule ids drift between releases, and every team has custom rules. Merge
-a local catalog over the packaged one:
+The package contains guidance for AWS access keys, AWS secret access keys,
+GitHub PATs and App keys, Slack bot tokens and webhooks, Stripe secret keys,
+GCP service-account JSON, Azure Storage keys, PostgreSQL URIs, JWT signing keys,
+generic private keys and generic API keys.
 
-```yaml
-# .secguard/rules.yaml
-detectors:
-  gitleaks:
-    acme-internal-token: generic-api-key
-    acme-signing-key: jwt-signing-key
-```
+Each playbook has a review date and the same sections: identify, invalidate,
+rotate, audit usage, communicate and close. The containment mechanism and
+replacement order depend on the provider and the incident. Follow the
+[incident guide](docs/incident-flow.md) and confirm current provider guidance.
 
-```bash
-secguard scan check --input gitleaks.json --rules .secguard/rules.yaml
-```
+## Data handling and limits
 
-The packaged catalog maps only what is defensible. Where a mapping would be a
-guess, secguard falls back and says so.
+Adapters discard known credential fields such as `Secret`, `Match`,
+`Raw`, `RawV2` and `hashed_secret`. They retain selected metadata needed
+for review. Do not place credentials in paths, identifiers, descriptions,
+waiver reasons or other metadata: secguard is not a universal secret scrubber.
 
-## Security posture
+Tests cover credential canaries, malformed payloads, terminal control
+characters, Markdown escaping, directory-aware waiver scope, and writes
+through symlinks or Windows junctions. These checks do not establish safety
+under concurrent filesystem mutation by another process.
 
-- **Redaction is a tested invariant, not a convention.** The suite feeds
-  canary-laced fixtures through every output path (canonical JSON, SARIF,
-  Markdown report, PR comment, console) and asserts nothing leaks. A separate
-  test asserts the fixtures actually contain the canary, because a redaction
-  test against clean input proves nothing.
-- **Free text is sanitized.** ANSI escape sequences, control characters, and
-  newlines are stripped from anything a scanner supplies, and Markdown cells are
-  escaped, so a hostile report cannot forge log lines or break out of a table.
-- **Paths are validated.** Absolute and parent-traversal paths are rejected in
-  reports, waiver scope, and playbook slugs.
-- **File writes refuse symlinks** and never write through a symlinked directory.
-- **Error messages never echo input values**, so a validation failure cannot
-  print the credential it rejected.
+Each input report is limited to 64 MiB. Larger inputs exit with a processing
+error before JSON parsing. Collect reports in smaller repository scopes when
+that budget is exceeded; parsing and canonical findings still use memory.
 
-Report issues per [SECURITY.md](SECURITY.md). Never include a secret value.
+Findings combine by type, normalized path and line. Different reported lines
+can produce separate findings. Location-derived detect-secrets fingerprints
+change when code moves. For severity overrides, SARIF IDs include a stable
+severity suffix; see the [migration notes](CHANGELOG.md).
 
-## Development
-
-```bash
-python -m pip install -e ".[dev]"
-python -m pytest
-python -m ruff check . && python -m ruff format --check .
-```
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+Report vulnerabilities through [SECURITY.md](SECURITY.md). Contribution and
+extension guidance is in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
+[Apache-2.0](LICENSE).

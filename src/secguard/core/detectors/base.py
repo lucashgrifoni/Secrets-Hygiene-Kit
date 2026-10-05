@@ -7,6 +7,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from secguard.core.findings import FindingParseError, validate_repository_relative_path
+from secguard.core.redaction import has_control_characters, sanitize_text
 
 
 def load_json(text: str, *, source: str) -> Any:
@@ -14,7 +15,15 @@ def load_json(text: str, *, source: str) -> Any:
     try:
         return json.loads(text)
     except json.JSONDecodeError as exc:
-        raise FindingParseError(f"invalid JSON in {source}: line {exc.lineno}") from exc
+        raise FindingParseError(
+            f"invalid JSON in {source}: line {exc.lineno} column {exc.colno} ({exc.msg})"
+        ) from exc
+    except RecursionError as exc:
+        # Deeply nested JSON exhausts the C parser's stack. It is malformed
+        # input, not a gate decision.
+        raise FindingParseError(f"{source}: JSON is nested too deeply to parse") from exc
+    except ValueError as exc:
+        raise FindingParseError(f"{source}: JSON contains an unsupported numeric value") from exc
 
 
 def pick(item: dict[str, Any], *keys: str) -> Any:
@@ -25,17 +34,28 @@ def pick(item: dict[str, Any], *keys: str) -> Any:
     return None
 
 
+# No source file has this many lines. A value above it is a malformed report,
+# and passing it on would put an integer downstream consumers cannot represent
+# into SARIF.
+MAX_LINE_OR_COLUMN = 2**31 - 1
+
+
 def positive_int(value: Any) -> int | None:
-    """Coerce a scanner-supplied line or column into a one-based integer."""
+    """Coerce a scanner-supplied line or column into a one-based integer.
+
+    Returns None for anything that is not a usable position, including the
+    infinities and NaN that `1e999` and `NaN` produce in JSON: a malformed
+    coordinate must degrade to "no position", never crash the gate.
+    """
     if isinstance(value, bool) or not isinstance(value, int | float | str):
         return None
 
     try:
         number = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
 
-    return number if number >= 1 else None
+    return number if 1 <= number <= MAX_LINE_OR_COLUMN else None
 
 
 def optional_bool(value: Any) -> bool | None:
@@ -51,9 +71,11 @@ def require_relative_path(value: Any, *, source: str, index: int) -> str:
     try:
         return validate_repository_relative_path(value.strip())
     except ValueError as exc:
-        name = PurePosixPath(value.replace("\\", "/")).name or "<unnamed>"
+        # The name is echoed to make the entry findable, so it goes through the
+        # same hygiene as any other scanner-supplied text.
+        name = sanitize_text(PurePosixPath(value.replace("\\", "/")).name) or "<unnamed>"
         raise FindingParseError(
-            f"{source}: entry {index} ({name}) has a path that is not repository-relative "
+            f"{source}: entry {index} ({name}) has an unusable file path "
             f"({exc}); run the scanner from the repository root so paths stay portable"
         ) from exc
 
@@ -66,7 +88,18 @@ def require_mapping(value: Any, *, source: str, index: int) -> dict[str, Any]:
 
 
 def require_text(value: Any, *, source: str, index: int, field: str) -> str:
-    """Ensure a required identifier field is a non-empty string."""
+    """Ensure a required identifier field is a non-empty string with no escapes.
+
+    A rule id is printed on the gate summary and compared against waiver
+    patterns. Accepting a newline in one would let a report forge a verdict
+    line, and accepting an escape sequence would let it repaint the terminal.
+    """
     if not isinstance(value, str) or not value.strip():
         raise FindingParseError(f"{source}: entry {index} is missing {field}")
-    return value.strip()
+
+    text = value.strip()
+    if has_control_characters(text):
+        raise FindingParseError(
+            f"{source}: entry {index} has control characters or escape sequences in {field}"
+        )
+    return text

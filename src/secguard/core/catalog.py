@@ -19,6 +19,8 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from secguard.core.redaction import has_control_characters, sanitize_text, validation_error_details
+
 CATALOG_SCHEMA_VERSION = "secguard.rules/v1"
 DATA_DIRECTORY = "data"
 PACKAGED_CATALOG_NAME = "rules.yaml"
@@ -74,7 +76,9 @@ class SecretTypeSpec(BaseModel):
         """Reject empty titles."""
         if not value:
             raise ValueError("field cannot be empty")
-        return value
+        if has_control_characters(value):
+            raise ValueError("title cannot contain control characters or escape sequences")
+        return sanitize_text(value)
 
     @field_validator("playbook")
     @classmethod
@@ -140,18 +144,21 @@ class RuleCatalog(BaseModel):
 
         for key in self.secret_types:
             if not _SLUG_PATTERN.match(key):
-                raise ValueError(f"secret type key must be kebab-case: {key}")
+                raise ValueError("secret type keys must be lowercase kebab-case")
 
         if self.fallback_secret_type not in self.secret_types:
-            raise ValueError(f"unknown fallback secret type: {self.fallback_secret_type}")
+            raise ValueError("fallback secret type must refer to a defined secret type")
 
         for detector, rules in self.detectors.items():
+            if not detector or has_control_characters(detector):
+                raise ValueError("detector names cannot be empty or contain control characters")
             for rule_id, spec in rules.items():
-                if spec.secret_type not in self.secret_types:
+                if not rule_id or has_control_characters(rule_id):
                     raise ValueError(
-                        f"detector {detector} rule {rule_id} references "
-                        f"unknown secret type: {spec.secret_type}"
+                        "rule identifiers cannot be empty or contain control characters"
                     )
+                if spec.secret_type not in self.secret_types:
+                    raise ValueError("detector rule refers to an unknown secret type")
 
         return self
 
@@ -216,10 +223,17 @@ def load_catalog(override: Path | None = None) -> RuleCatalog:
     if not override.is_file():
         raise CatalogError(f"rule catalog override is not a file: {override}")
 
+    # PyYAML raises a bare ValueError for a resolvable-but-impossible scalar
+    # such as `2026-02-30`, which would escape as a traceback and exit 1.
     try:
         raw = yaml.safe_load(override.read_text(encoding="utf-8"))
-    except yaml.YAMLError as exc:
-        raise CatalogError(f"invalid YAML in rule catalog override: {override}") from exc
+    except (yaml.YAMLError, ValueError, RecursionError) as exc:
+        raise CatalogError(
+            f"cannot parse rule catalog override {override}: the YAML is malformed or "
+            "holds a value no date can represent, such as 2026-02-30"
+        ) from exc
+    except OSError as exc:
+        raise CatalogError(f"cannot read rule catalog override {override}: {exc.strerror}") from exc
 
     if raw is None:
         return catalog
@@ -230,10 +244,14 @@ def load_catalog(override: Path | None = None) -> RuleCatalog:
     return _parse_catalog(merged, source=f"rule catalog override {override}")
 
 
-def default_catalog_override(root: Path) -> Path | None:
-    """Return the local catalog override path when it exists under a root."""
-    candidate = root / LOCAL_CATALOG_PATH
-    return candidate if candidate.is_file() else None
+#
+# There is deliberately no helper that discovers a local catalog and loads it.
+# `LOCAL_CATALOG_PATH` is the conventional place to keep one, and `--rules`
+# names it explicitly. A catalog can lower a severity, and a severity below the
+# threshold does not block, so a catalog picked up implicitly from inside the
+# scanned checkout would let anyone who can open a pull request turn a blocking
+# finding into a passing one — with none of the owner, approver, or expiry the
+# waiver lifecycle requires for exactly that decision.
 
 
 def _read_packaged_catalog() -> dict[str, Any]:
@@ -261,7 +279,7 @@ def _merge_catalog_documents(base: dict[str, Any], override: dict[str, Any]) -> 
             detectors = {name: dict(rules) for name, rules in (base.get("detectors") or {}).items()}
             for detector, rules in value.items():
                 if not isinstance(rules, dict):
-                    raise CatalogError(f"detector {detector} must map rule ids to secret types")
+                    raise CatalogError("each detector must map rule ids to secret types")
                 detectors.setdefault(detector, {}).update(rules)
             merged["detectors"] = detectors
         else:
@@ -274,8 +292,5 @@ def _parse_catalog(content: dict[str, Any], *, source: str) -> RuleCatalog:
     try:
         return RuleCatalog.model_validate(content)
     except ValidationError as exc:
-        details = "; ".join(
-            f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
-            for error in exc.errors(include_input=False)
-        )
+        details = validation_error_details(exc.errors(include_input=False))
         raise CatalogError(f"invalid {source}: {details}") from exc

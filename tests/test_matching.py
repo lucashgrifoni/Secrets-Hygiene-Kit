@@ -29,6 +29,16 @@ from secguard.core.matching import path_matches, rule_matches
         ("*", "key.py", True),
         ("*", "tests/key.py", False),
         ("**", "tests/nested/key.py", True),
+        ("a/*/b", "a/b", False),
+        ("a/**/b", "a/b", True),
+        ("a/**/b", "a/x/y/b", True),
+        ("**/b", "a//b", False),
+        ("?", "/", False),
+        ("*", "", True),
+        ("", "", True),
+        ("[x]+(y)", "[x]+(y)", True),
+        ("*.py", "ação.py", True),
+        ("A.py", "a.py", False),
     ],
 )
 def test_path_matching_is_directory_aware(pattern, value, expected):

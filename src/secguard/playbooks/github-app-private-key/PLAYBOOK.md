@@ -1,6 +1,6 @@
 # GitHub App Private Key Leak Playbook
 
-Vetted: 2026-08-04
+Vetted: 2026-10-05
 
 ## Scope
 
@@ -22,16 +22,24 @@ Do not paste key material into tickets, chat, or logs.
 
 ## Invalidate
 
-- Generate a new private key for the App first, then delete the exposed key. Apps support
-  multiple active keys, so this order avoids an outage while still containing the leak.
+- For an owner-approved staged replacement, generate a new private key, securely update all
+  consumers, and prove they can obtain tokens with the replacement before deleting the
+  exposed key. Multiple active keys permit migration; the exposed key remains a risk until
+  deletion. Record a short deadline and the expected service impact.
 - Delete the exposed key even if no abuse is visible. Key material does not expire on its own.
-- If the App holds write or admin permissions and abuse is suspected, suspend the installation
-  while you investigate.
+- If abuse is suspected, have the authorized owner contain affected installations promptly,
+  including suspension where appropriate. If the exposed key is the App's only key, GitHub
+  requires another key to exist before it can be deleted; do not wait for normal migration
+  to finish before selecting an incident containment path.
+- Account for installation tokens already issued during exposure. They expire after one
+  hour, and known compromised tokens need separate revocation. Key deletion alone is not
+  evidence that every previously issued token was invalidated.
 
 ## Rotate
 
 - Distribute the new key through the approved secret manager or CI/CD variable store.
-- Restart or redeploy every consumer so no process keeps the old key in memory.
+- Apply each consumer's credential reload contract, restarting or redeploying when needed,
+  and verify authenticated operations with the replacement.
 - Reduce App permissions to what the workload actually uses, and remove installations that
   are no longer needed.
 - Prefer fine-grained permissions and repository-scoped installations over organization-wide
@@ -45,6 +53,9 @@ Do not paste key material into tickets, chat, or logs.
 - Check for commits, releases, or deploy keys attributed to the App that no owner recognizes.
 - Installation tokens are short-lived, so focus on what was done with them rather than on
   which tokens existed.
+- Record audit permissions, plan availability, installations, event categories, retention,
+  and interval coverage. Organization audit logs do not capture every repository view or
+  request; unavailable telemetry remains an evidence gap.
 
 ## Communicate
 
@@ -61,3 +72,10 @@ Do not paste key material into tickets, chat, or logs.
 - Add detection for PEM material in pre-commit and CI.
 - Store the replacement key so no human copy exists outside the secret manager.
 - Record residual risk with an owner and a review date if audit coverage was incomplete.
+
+## References
+
+- [GitHub App key generation and deletion](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/managing-private-keys-for-github-apps)
+- [GitHub App compromise response](https://docs.github.com/en/enterprise-cloud%40latest/apps/creating-github-apps/about-creating-github-apps/best-practices-for-creating-a-github-app)
+- [Installation token lifetime](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app)
+- [GitHub incident investigation coverage](https://docs.github.com/en/enterprise-cloud%40latest/code-security/reference/security-incident-response/investigation-areas)

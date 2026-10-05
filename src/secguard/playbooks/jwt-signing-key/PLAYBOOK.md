@@ -1,15 +1,17 @@
 # JWT Signing Key Leak Playbook
 
-Vetted: 2026-08-04
+Vetted: 2026-10-05
 
 ## Scope
 
 Use this playbook when a JWT signing key is exposed: an HMAC secret for `HS256`, or a private
-key for `RS256` and `ES256`. Anyone holding it can mint valid tokens for any user, any role,
-and any expiry. Revoking sessions does not help until the key is replaced.
+key for `RS256` and `ES256`. Anyone holding it can forge signed claims; the impact depends on
+which claims and issuers each verifier trusts. Session revocation alone does not remove
+that signing capability.
 
-A leaked signed token is a narrower problem: revoke the session and check its claims. A leaked
-signing key is an authentication bypass.
+A leaked signed token is a narrower problem: use the issuer's session or token revocation
+mechanism where available and check its claims. A leaked signing key can bypass authentication
+where its signed claims are trusted.
 
 Do not paste the key or a full token into tickets, chat, or logs.
 
@@ -20,19 +22,25 @@ Do not paste the key or a full token into tickets, chat, or logs.
   the `kid`, `iss`, `aud`, and `exp` claims for the record.
 - Identify every service that validates tokens signed with this key, including internal
   services that trust the issuer transitively.
-- Determine the maximum token lifetime, because that sets how long a forged token stays valid
-  after rotation.
+- Determine token lifetime limits, verifier key caches, and session behavior. An attacker can
+  choose a forged token's expiry; the issuer's normal lifetime does not bound that token
+  unless each verifier enforces the limit independently.
 
 ## Invalidate
 
-- Rotate the signing key. Until it is replaced, every access control that depends on token
-  validation is bypassable.
+- Replace the signing key and remove the exposed key from every verifier's accepted trust
+  set. Confirm issuer revocation and verifier adoption separately, including cached keys.
 - If the issuer supports key ids, publish the new key alongside the old one, move signing to
-  the new key, then stop accepting the old `kid`. That contains the leak without a hard
-  outage.
-- If the issuer has no `kid` support, accept the session invalidation and rotate directly.
-  Availability is the cheaper loss here.
+  the new key, then stop accepting the old `kid` at every verifier. While the exposed key
+  remains accepted, forged tokens can still pass. Any overlap needs an authorized owner,
+  a short deadline, and explicit residual risk; it cannot guarantee an uninterrupted service.
+- If abuse requires urgent containment, use the issuer's emergency rotation and revocation
+  path with the identity owner. Without `kid` support, coordinate direct replacement and
+  the expected session invalidation.
 - Invalidate refresh tokens and active sessions issued during the exposure window.
+- Under the authorized validation plan, prove old-key tokens are rejected and legitimate
+  replacement tokens still work at each verifier. Rejecting one old `kid` is insufficient
+  if the same exposed key remains trusted through another lookup path.
 
 ## Rotate
 
@@ -51,6 +59,8 @@ Do not paste the key or a full token into tickets, chat, or logs.
 - Check for successful requests that have no corresponding session creation: a forged token
   produces authorized activity with no login.
 - If logs do not record token claims, record that gap rather than reporting a clean window.
+- Record the inspected services, retention, and interval without copying full tokens. Claims
+  from an unverified token are investigative leads, not proof of identity or issuer.
 
 ## Communicate
 
@@ -65,3 +75,12 @@ Do not paste the key or a full token into tickets, chat, or logs.
 - Add detection for signing keys and private key blocks in pre-commit and CI.
 - Move signing into a KMS or HSM if the key was stored in application configuration.
 - Record residual risk with an owner and a review date.
+
+## References
+
+- [JWT validation best practices, RFC 8725](https://www.rfc-editor.org/rfc/rfc8725.html)
+- [Signing key rotation and verifier impact](https://auth0.com/docs/get-started/tenant-settings/signing-keys/rotate-signing-keys)
+- [Signing key revocation](https://auth0.com/docs/get-started/tenant-settings/signing-keys/revoke-signing-keys)
+
+Auth0 is an issuer-specific example. Other issuers and verifier libraries need their own
+revocation and cache-refresh procedure.

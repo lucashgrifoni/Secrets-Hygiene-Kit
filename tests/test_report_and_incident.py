@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date, timedelta
 
 import pytest
@@ -13,7 +14,7 @@ from secguard.core.findings import FindingDocument
 from secguard.core.incident import render_incident
 from secguard.core.playbooks import load_playbook
 from secguard.core.reconcile import reconcile
-from secguard.core.redaction import escape_markdown_cell
+from secguard.core.redaction import escape_markdown_cell, markdown_code_span
 from secguard.core.report import render_pr_comment, render_report
 from secguard.core.waivers import WaiverDocument, new_waiver_document
 
@@ -65,7 +66,7 @@ def test_report_says_plainly_what_the_tool_does_not_do(catalog):
 def test_report_lists_playbooks_and_the_response_order(catalog):
     markdown = render_report(_outcome(catalog), generated_on=TODAY, version=__version__)
 
-    assert "Invalidate first, rotate second, audit third." in markdown
+    assert "Contain exposed access at the issuer" in markdown
     assert "secguard playbooks show aws-access-key" in markdown
 
 
@@ -218,3 +219,94 @@ def test_incident_metadata_is_sanitized(hostile):
 
     assert "\x1b" not in leaked_line
     assert len(leaked_line) <= len("- Leaked via: ") + 120
+
+
+# ------------------------------------------------------- markdown injection
+
+
+def _report_with_path(path: str, catalog, tmp_path):
+    report = tmp_path / "gitleaks.json"
+    report.write_text(
+        json.dumps([{"RuleID": "aws-access-token", "File": path, "StartLine": 1}]),
+        encoding="utf-8",
+    )
+    return reconcile(
+        load_reports([report], catalog=catalog),
+        new_waiver_document(),
+        today=TODAY,
+        fail_on="medium",
+    )
+
+
+def test_a_backtick_in_a_path_cannot_close_the_code_span(catalog, tmp_path):
+    """A file name is attacker-influenced; the report is read by a reviewer.
+
+    Escaping the pipe alone let a path close its span and open a link, so a
+    hostile report could put a clickable URL into a pull-request comment that
+    looked like it came from secguard.
+    """
+    hostile = "a`.py) [CLICK ME](https:@evil.example) `x"
+    outcome = _report_with_path(hostile, catalog, tmp_path)
+
+    for rendered in (
+        render_pr_comment(outcome, generated_on=TODAY),
+        render_report(outcome, generated_on=TODAY, version=__version__),
+    ):
+        # The payload survives as literal text, but never as active markup: the
+        # fence is longer than the longest backtick run inside it.
+        assert "``" in rendered
+        assert "] (" not in rendered
+        link_line = next(line for line in rendered.splitlines() if "CLICK ME" in line)
+        assert link_line.count("`") % 2 == 0
+        assert not link_line.strip().startswith("[")
+
+
+def test_a_pipe_in_a_path_cannot_add_a_table_column(catalog, tmp_path):
+    outcome = _report_with_path("a|b|c.py", catalog, tmp_path)
+    rendered = render_report(outcome, generated_on=TODAY, version=__version__)
+
+    row = next(line for line in rendered.splitlines() if r"a\|b\|c.py" in line)
+    assert row.count("|") - row.count(r"\|") == 7
+
+
+def test_markdown_code_span_fences_longer_than_the_content():
+    assert markdown_code_span("plain") == "`plain`"
+    assert markdown_code_span("a`b") == "``a`b``"
+    assert markdown_code_span("a``b") == "```a``b```"
+    assert markdown_code_span("`edge`") == "`` `edge` ``"
+    assert markdown_code_span("a|b") == r"`a\|b`"
+
+
+def test_the_escape_set_covers_every_character_that_can_start_markup():
+    """The original set was backslash and pipe only, leaving a value free to open a link."""
+    escaped = escape_markdown_cell("a`b|c*d_e[f]g<h>i")
+
+    for character in ("`", "|", "*", "_", "[", "]", "<", ">"):
+        assert "\\" + character in escaped, character
+    assert escape_markdown_cell(r"a\b") == r"a\\b"
+
+
+def test_the_markdown_report_warns_about_a_guessed_classification(catalog, tmp_path):
+    """Four documents told the responder to look for `mapping: fallback`.
+
+    The console half is covered elsewhere; without this the report half could
+    disappear and nothing would notice.
+    """
+    report = tmp_path / "gitleaks.json"
+    report.write_text(
+        json.dumps([{"RuleID": "acme-internal-token", "File": "svc/app.py", "StartLine": 7}]),
+        encoding="utf-8",
+    )
+    outcome = reconcile(
+        load_reports([report], catalog=catalog),
+        new_waiver_document(),
+        today=TODAY,
+        fail_on="none",
+    )
+    assert outcome.results[0].finding.mapping == "fallback"
+
+    rendered = render_report(outcome, generated_on=TODAY, version=__version__)
+
+    assert "resolved by fallback" in rendered
+    assert "the secret type is a guess" in rendered
+    assert "gitleaks:acme-internal-token" in rendered

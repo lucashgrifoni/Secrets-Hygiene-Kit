@@ -1,0 +1,30 @@
+name: Bug report
+description: Report an unexpected CLI result using synthetic data.
+title: "Bug: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include credentials, raw scanner reports or sensitive account data.
+        Report suspected vulnerabilities through the private channel in SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: secguard version
+      description: Include Python version and operating system.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide a minimal command and synthetic input that reproduce the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and observed behavior
+      description: Include the exit code and redacted output.
+    validations:
+      required: true

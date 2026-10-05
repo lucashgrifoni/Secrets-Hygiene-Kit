@@ -8,6 +8,8 @@ from importlib.resources import files
 from pathlib import Path
 from typing import Literal
 
+from secguard.core.writing import is_link
+
 TEMPLATE_DIRECTORY = "templates"
 
 
@@ -139,7 +141,7 @@ def _validate_template_destination(destination: Path) -> None:
 
 
 def _planned_action(target: Path, *, force: bool) -> InitAction:
-    if target.is_symlink():
+    if is_link(target):
         return "would-overwrite" if force else "would-skip"
     if target.exists():
         if target.is_dir():
@@ -155,7 +157,7 @@ def _write_template(
     *,
     force: bool,
 ) -> InitAction:
-    if target.is_symlink():
+    if is_link(target):
         if force:
             raise InitSafetyError(f"refusing to overwrite symlink: {target}")
         return "skipped"
@@ -167,7 +169,12 @@ def _write_template(
             return "skipped"
 
         _assert_write_path_is_safe(destination, target)
-        target.write_text(_read_template(source_name), encoding="utf-8", newline="\n")
+        try:
+            target.write_text(_read_template(source_name), encoding="utf-8", newline="\n")
+        except OSError as exc:
+            raise InitDestinationError(
+                f"cannot write starter file {target}: {exc.strerror}"
+            ) from exc
         return "overwritten"
 
     _assert_write_path_is_safe(destination, target)
@@ -178,6 +185,8 @@ def _write_template(
             output.write(_read_template(source_name))
     except FileExistsError:
         return "skipped"
+    except OSError as exc:
+        raise InitDestinationError(f"cannot write starter file {target}: {exc.strerror}") from exc
 
     return "created"
 
@@ -188,10 +197,10 @@ def _assert_write_path_is_safe(destination: Path, target: Path) -> None:
 
     for part in relative_parent.parts:
         current /= part
-        if current.exists() and current.is_symlink():
+        if is_link(current):
             raise InitSafetyError(f"refusing to write through symlinked directory: {current}")
 
-    if target.is_symlink():
+    if is_link(target):
         raise InitSafetyError(f"refusing to overwrite symlink: {target}")
 
 

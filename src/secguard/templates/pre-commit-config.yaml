@@ -17,17 +17,29 @@
 #       - id: detect-secrets
 #         args: ["--baseline", ".secrets.baseline"]
 
+# Both hooks accept an audited bypass for the case where a fix genuinely cannot
+# wait for the check to pass:
+#
+#   SECGUARD_OVERRIDE=1 SECGUARD_OVERRIDE_REASON="hotfix INC-42, waiver renewed Monday" git commit
+#
+# The reason is mandatory, the finding is still printed, and the bypass is
+# announced so it can go in the commit message. `--allow-override` appears only
+# here: the CI gate never honors it, so an override buys one local commit, not
+# a green build.
+
 repos:
   - repo: local
     hooks:
       - id: secguard-waivers-check
         name: secguard waiver expiry check
-        entry: secguard waivers check --file .secguard/waivers.yaml
+        entry: secguard waivers check --file .secguard/waivers.yaml --allow-override
         language: system
         pass_filenames: false
+        always_run: true
 
       - id: secguard-playbooks-check
         name: secguard playbook freshness check
-        entry: secguard playbooks check
+        entry: secguard playbooks check --allow-override
         language: system
         pass_filenames: false
+        always_run: true

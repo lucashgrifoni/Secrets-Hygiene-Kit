@@ -1,122 +1,84 @@
-# I leaked a secret. What now?
+# Responding to an exposed credential
 
-The first thirty minutes decide how bad this gets. Work in this order.
+Contain exposed access promptly. secguard prints guidance; an authorized
+responder performs every provider action.
 
-## The one rule
+## Preserve references without spreading the secret
 
-**Do not copy the credential anywhere new.** Not into a ticket, a chat message,
-a screenshot, a waiver reason, or a log line. Reference it by provider, rule id,
-redacted fingerprint, file path, commit hash, and timestamp.
+Record the provider, resource or account, rule ID, redacted fingerprint, path,
+commit and exposure timestamp. Never copy the credential into an issue, chat,
+screenshot, waiver reason or incident checklist.
 
-Every step below is executed by a human with the authority to do it. secguard
-prints instructions; it never contacts a provider.
+Capture enough metadata to identify the affected credential and notify its
+owner. Continue scoping in parallel with urgent containment; a complete
+inventory must not delay an emergency response.
 
-## Order of operations
+## Get the provider checklist
 
-**Invalidate first. Rotate second. Audit third. Clean up last.**
-
-The most common mistake is starting with `git filter-repo`. Rewriting history is
-not containment: the credential was already cloned, cached, mirrored, and
-possibly indexed. Deleting it from source while it still works changes nothing
-for the attacker and costs you the minutes that mattered.
-
-## 1. Get the checklist
-
-```bash
-secguard incident start \
-  --secret-type aws-access-key \
-  --leaked-via public-github-issue \
-  --reference INC-2026-42 \
-  --output incident-aws.md
+```console
+secguard incident start --secret-type aws-access-key --leaked-via public-github-issue --reference INC-2026-42 --output incident-aws.md
 ```
 
-Find the secret type from a scan:
+Use the canonical type shown by the scan. If the mapping is a fallback,
+identify the actual provider before applying provider-specific instructions.
 
-```bash
-secguard scan check --input gitleaks.json --fail-on none
-# - critical  aws-access-key  src/example_config.py:12  ... playbook=aws-access-key
-```
+## Scope the exposure
 
-If the finding shows `mapping: fallback`, secguard could not classify the rule
-and gave you the generic playbook. Identify the provider yourself before acting,
-then add a catalog mapping so the next occurrence routes correctly.
+Establish permissions, consumers, exposure window and distribution through
+repositories, logs, packages or images. Treat public exposure as requiring
+containment even when use cannot yet be confirmed.
 
-## 2. Scope the exposure
+A `verified=live` label is a claim imported from the detector report at scan
+time. secguard does not test the credential. Absence of the label does not
+prove that access is invalid.
 
-Answer these before touching the provider, because they set the response:
+## Contain and replace at the issuer
 
-- **What can the credential do?** Permissions, not credential type, set the
-  blast radius. A read-only key and an admin key are different incidents.
-- **How long was it exposed?** From the commit that introduced it to now.
-- **Who could see it?** A public repository, a public issue, a published package
-  or container image, and a CI log all mean "assume harvested". Bots scrape
-  public git in minutes.
-- **Is it live?** `verified=live` in a secguard scan means trufflehog
-  authenticated it successfully. Absence of that flag is not evidence it is
-  dead.
+Choose the mechanism supported by the affected provider. Deactivate, revoke,
+regenerate or remove trust as appropriate. Source deletion and history
+rewriting do not invalidate access already copied elsewhere.
 
-## 3. Invalidate
+If an approved replacement must be adopted before invalidation to preserve a
+service, require an authorized owner, a short deadline and evidence that every
+consumer adopted it. Record the exposure risk during that interval.
 
-Prefer the reversible step where the provider has one: deactivate an AWS key
-before deleting it, publish a new GitHub App key before removing the old, move
-Azure Storage consumers to the second key before regenerating the first.
+- For AWS IAM user keys, follow the IAM playbook. Root credentials require the
+  root-account procedure; do not replace them with another root access key.
+- For GitHub App keys, account for the final active key, consumer adoption and
+  installation tokens already issued.
+- For Azure Storage keys, identify the exposed slot and current use of both
+  slots before regenerating one. Review SAS types and their revocation paths.
+- For database and signing credentials, replacement may leave existing
+  sessions, issued tokens or cached trust valid. Follow the specific playbook.
 
-If you lack the permission, escalate immediately. Containment authority belongs
-to the account owner, not to whoever found the leak. Do not wait for the
-original developer to come online.
+Escalate immediately when you lack containment authority. Coordinate the
+impact with the service owner and verify invalidation at the issuer.
 
-## 4. Rotate
+Distribute replacement material through the approved secret manager or CI
+variable store. Refresh or reconnect consumers according to their contract,
+then prove the required authenticated operation works with the replacement.
 
-Distribute the replacement through the approved secret manager or CI/CD variable
-store, never by editing a file in the repository. Take the opportunity to reduce
-scope: most leaked credentials had more permissions than the workload used, and
-many did not need a long-lived credential at all.
+## Investigate use and derived access
 
-Restart or redeploy every consumer, including cron jobs, migrations, and
-webhooks, which are where an old credential usually survives a rotation.
+Review the exposure window using the available provider and service logs.
+Check suspicious use, privilege changes, new credentials and derived access
+appropriate to the provider.
 
-## 5. Audit usage
+Record the log sources, categories, retention, pagination, permissions and
+coverage gaps. Absence of recorded activity does not establish absence of
+misuse when relevant logging or retention is incomplete.
 
-Review provider logs across the **entire** exposure window, not just recent
-activity. Look for persistence before you look for data theft: new credentials,
-new users or roles, changed permissions, and new integrations.
+## Communicate and close
 
-When a log source was disabled, say so in the record. "We could not tell" is a
-finding. "It looked clean" when the logs were off is a false assurance that will
-be quoted back at you later.
+Notify the service owner and security team with redacted evidence, containment
+status, impact and remaining gaps. Involve privacy or legal when regulated
+data may be affected; they determine the applicable obligations and deadlines.
 
-## 6. Communicate
+After containment, remove the credential from source and distributed
+artifacts. Review cached copies, images and CI logs as needed. Cleanup must not
+reactivate old access.
 
-Notify the service owner, AppSec, and the provider or account owner with
-redacted evidence: actions taken, exposure window, audit coverage, and residual
-risk. If personal or customer data was reachable and access cannot be ruled out,
-involve privacy or legal early. LGPD and GDPR notification clocks do not wait
-for the technical investigation to finish.
-
-## 7. Close out
-
-- Remove the credential from source, artifacts, container images, and CI logs.
-  Now that it is invalid, history rewriting is cleanup rather than containment.
-- Add detection so the same pattern is caught next time.
-- If the match was an intentional fixture, replace the realistic value with an
-  obviously fake one, then open a waiver with an owner and an expiry.
-- Write down residual risk with an owner and a review date, especially when
-  audit coverage was incomplete.
-
-## When it was only a fixture
-
-Not every detector hit is an incident. If the value is genuinely synthetic:
-
-```bash
-secguard waivers add \
-  --rule "secret-type:aws-access-key" \
-  --path "tests/fixtures/**" \
-  --reason "Synthetic value in a detector fixture, not a credential." \
-  --owner appsec@example.com \
-  --approver security-lead \
-  --expires 2026-11-01
-```
-
-Confirm it is synthetic before waiving. A waiver on a real credential is worse
-than no scanning at all, because it converts a visible finding into a documented
-decision not to look.
+Record consumer adoption, issuer invalidation, derived-access review and
+residual risk with an owner and review date. A detected synthetic fixture may
+use an expiring waiver after its provenance has been established. A waiver
+does not contain a real credential.

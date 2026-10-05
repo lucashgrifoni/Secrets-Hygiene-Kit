@@ -104,8 +104,8 @@ directions:
 
 | Severity | Use when |
 | --- | --- |
-| `critical` | mints other credentials, moves money, or signs artifacts (GitHub App private key, Stripe live key, JWT signing key, GCP service account key) |
-| `high` | direct access to an account or data plane (AWS access key, GitHub PAT, Azure Storage key, database URI) |
+| `critical` | mints other credentials, moves money, or signs artifacts (GitHub App private key, Stripe live key, GCP service account key) |
+| `high` | direct access to an account or data plane (AWS access key, GitHub PAT, Azure Storage key, database URI, JWT signing key) |
 | `medium` | scoped or single-purpose access (Slack webhook, unclassified API key) |
 | `low` | heuristic matches with a high false-positive rate (entropy detectors) |
 
@@ -115,7 +115,7 @@ that severity estimates exist to model.
 
 ## 7. Verify
 
-```bash
+```console
 python -m pytest tests/test_playbooks.py
 secguard playbooks show <slug>
 secguard incident start --secret-type <secret-type>
@@ -125,8 +125,17 @@ python -m ruff check . && python -m ruff format --check .
 Then confirm the playbook survives packaging, since playbooks ship as package
 data and a missing entry only shows up after install:
 
-```bash
+```console
 python -m build
 python -m venv /tmp/verify && /tmp/verify/bin/python -m pip install dist/*.whl
 /tmp/verify/bin/secguard playbooks list
+```
+
+On Windows the virtualenv puts its executables in `Scripts`, not `bin`:
+
+```console
+python -m build
+python -m venv $env:TEMP\verify
+& "$env:TEMP\verify\Scripts\python.exe" -m pip install (Get-Item dist\*.whl)
+& "$env:TEMP\verify\Scripts\secguard.exe" playbooks list
 ```

@@ -6,10 +6,12 @@
 #   include:
 #     - local: '.gitlab/secguard.gitlab-ci.yml'
 
+# Install the GitHub release revision reviewed by your team. The image needs
+# Git; dependencies still come from the configured Python package index.
 .secguard_base:
-  image: python:3.12-slim
+  image: python:3.12
   before_script:
-    - python -m pip install --no-cache-dir secrets-hygiene-kit
+    - python -m pip install --no-cache-dir "git+https://github.com/lucashgrifoni/secrets-hygiene-kit@v0.3.0"
 
 secguard:waivers:
   extends: .secguard_base
@@ -27,6 +29,8 @@ secguard:gate:
   # Detection runs in a job your team controls and pins. Have it publish
   # gitleaks.json, trufflehog.jsonl, or .secrets.baseline as an artifact, then
   # let this job consume the report and decide block or pass.
+  # Keep scan errors fatal: use gitleaks --exit-code 0 or TruffleHog
+  # --fail-on-scan-errors, without suppressing the detector's exit status.
   needs:
     - job: secrets:detect
       artifacts: true
@@ -40,8 +44,12 @@ secguard:gate:
         fi
       done
       if [ -z "$args" ]; then
-        echo "no scanner report found; skipping the secguard gate"
-        exit 0
+        # Passing here would make a pipeline whose detect job never ran
+        # indistinguishable from a repository with no secrets.
+        echo "no scanner report found, so nothing was gated." >&2
+        echo "Have secrets:detect publish gitleaks.json, trufflehog.jsonl," >&2
+        echo "or .secrets.baseline as an artifact this job can consume." >&2
+        exit 1
       fi
       secguard scan check $args \
         --waivers .secguard/waivers.yaml \

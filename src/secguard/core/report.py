@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import date
 
 from secguard.core.reconcile import ReconciledFinding, ScanOutcome
-from secguard.core.redaction import escape_markdown_cell
+from secguard.core.redaction import escape_markdown_cell, markdown_code_span
 from secguard.core.waivers import Waiver
 
 MAX_TABLE_ROWS = 100
@@ -62,7 +62,7 @@ def render_pr_comment(outcome: ScanOutcome, *, generated_on: date) -> str:
                 "anything. Renew with a new expiry or delete them:",
                 "",
                 *[
-                    f"- `{waiver.id}` expired {waiver.expires_at.isoformat()}"
+                    f"- {markdown_code_span(waiver.id)} expired {waiver.expires_at.isoformat()}"
                     for waiver in outcome.expired_waivers[:MAX_LIST_ROWS]
                 ],
                 "",
@@ -73,8 +73,8 @@ def render_pr_comment(outcome: ScanOutcome, *, generated_on: date) -> str:
     if blocking:
         lines.extend(["Blocking findings:", ""])
         lines.extend(
-            f"- **{result.finding.severity}** `{escape_markdown_cell(result.finding.secret_type)}` "
-            f"in `{escape_markdown_cell(_location(result.finding))}` "
+            f"- **{result.finding.severity}** {markdown_code_span(result.finding.secret_type)} "
+            f"in {markdown_code_span(_location(result.finding))} "
             f"-> `secguard incident start --secret-type {result.finding.secret_type}`"
             for result in blocking[:MAX_LIST_ROWS]
         )
@@ -122,7 +122,12 @@ def _next_actions(outcome: ScanOutcome) -> list[str]:
     if not outcome.active:
         return []
 
-    lines = ["## What to do next", "", "1. Invalidate first, rotate second, audit third."]
+    lines = [
+        "## What to do next",
+        "",
+        "1. Contain exposed access at the issuer; "
+        "follow the provider playbook's replacement order.",
+    ]
     lines.extend(
         f"{index}. Open the `{playbook}` playbook: `secguard playbooks show {playbook}`"
         for index, playbook in enumerate(outcome.playbooks(), start=2)
@@ -143,11 +148,11 @@ def _findings_table(title: str, results: list[ReconciledFinding]) -> list[str]:
 
     rows = [
         f"| {result.finding.severity} "
-        f"| `{escape_markdown_cell(result.finding.secret_type)}` "
-        f"| `{escape_markdown_cell(_location(result.finding))}` "
+        f"| {markdown_code_span(result.finding.secret_type)} "
+        f"| {markdown_code_span(_location(result.finding))} "
         f"| {escape_markdown_cell(_scanners(result))} "
         f"| {_verified_label(result)} "
-        f"| `{escape_markdown_cell(result.finding.playbook)}` |"
+        f"| {markdown_code_span(result.finding.playbook)} |"
         for result in results[:MAX_TABLE_ROWS]
     ]
 
@@ -158,6 +163,25 @@ def _findings_table(title: str, results: list[ReconciledFinding]) -> list[str]:
         "| --- | --- | --- | --- | --- | --- |",
         *rows,
     ]
+
+    guessed = [
+        result for result in results[:MAX_TABLE_ROWS] if result.finding.mapping == "fallback"
+    ]
+    if guessed:
+        lines.extend(
+            [
+                "",
+                f"{len(guessed)} of these resolved by fallback: no catalog entry matched the "
+                "detector rule, so the generic playbook applies and the secret type is a guess. "
+                "Identify the provider yourself before acting, then add a mapping:",
+                "",
+                *[
+                    f"- {markdown_code_span(result.finding.rule)} at "
+                    f"{markdown_code_span(_location(result.finding))}"
+                    for result in guessed[:MAX_LIST_ROWS]
+                ],
+            ]
+        )
 
     if len(results) > MAX_TABLE_ROWS:
         lines.append("")
@@ -175,9 +199,9 @@ def _waived_table(outcome: ScanOutcome) -> list[str]:
         return []
 
     rows = [
-        f"| `{result.waiver_id}` | {result.finding.severity} | "
-        f"`{escape_markdown_cell(result.finding.secret_type)}` | "
-        f"`{escape_markdown_cell(_location(result.finding))}` |"
+        f"| {markdown_code_span(result.waiver_id or '')} | {result.finding.severity} | "
+        f"{markdown_code_span(result.finding.secret_type)} | "
+        f"{markdown_code_span(_location(result.finding))} |"
         for result in outcome.waived[:MAX_TABLE_ROWS]
     ]
     return [
@@ -193,7 +217,7 @@ def _waived_table(outcome: ScanOutcome) -> list[str]:
 
 
 def _waiver_hygiene(outcome: ScanOutcome) -> list[str]:
-    if not outcome.expired_waivers and not outcome.unused_waivers:
+    if not (outcome.expired_waivers or outcome.unused_waivers or outcome.narrowed_waivers):
         return []
 
     lines = ["## Waiver hygiene", ""]
@@ -217,13 +241,24 @@ def _waiver_hygiene(outcome: ScanOutcome) -> list[str]:
         lines.extend(_waiver_lines(outcome.unused_waivers))
         lines.append("")
 
+    if outcome.narrowed_waivers:
+        lines.append(
+            f"{len(outcome.narrowed_waivers)} waiver(s) name a detector rule that covers only "
+            "part of a finding several detectors reported. A waiver suppresses a merged finding "
+            "only when it covers every detection in it, so re-scope these to "
+            "`secret-type:<type>` after reviewing the evidence the other detectors added."
+        )
+        lines.append("")
+        lines.extend(_waiver_lines(outcome.narrowed_waivers))
+        lines.append("")
+
     return lines
 
 
 def _waiver_lines(waivers: list[Waiver]) -> list[str]:
     return [
-        f"- `{waiver.id}` rule `{escape_markdown_cell(waiver.rule)}` "
-        f"path `{escape_markdown_cell(waiver.path)}` "
+        f"- {markdown_code_span(waiver.id)} rule {markdown_code_span(waiver.rule)} "
+        f"path {markdown_code_span(waiver.path)} "
         f"owner {escape_markdown_cell(waiver.owner)} "
         f"expires {waiver.expires_at.isoformat()}"
         for waiver in waivers

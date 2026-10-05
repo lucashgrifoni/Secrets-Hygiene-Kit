@@ -61,13 +61,47 @@ def test_threshold_is_inclusive_and_ordered(findings):
 
 
 def test_an_active_waiver_suppresses_a_finding(findings):
-    outcome = reconcile(findings, _waivers(_waiver()), today=TODAY, fail_on="high")
+    outcome = reconcile(
+        findings,
+        _waivers(_waiver(rule="secret-type:aws-access-key")),
+        today=TODAY,
+        fail_on="high",
+    )
 
     waived = outcome.waived
     assert len(waived) == 1
     assert waived[0].finding.secret_type == "aws-access-key"
     assert waived[0].waiver_id == "WV-2026-001"
     assert len(outcome.blocking) == 1
+
+
+def test_a_detector_scoped_waiver_cannot_suppress_another_detectors_detection(findings):
+    """Adding a detector must never weaken the gate.
+
+    The AWS finding in the fixtures is one leak that gitleaks, trufflehog, and
+    detect-secrets all reported, merged into a single record whose `rule` is
+    whichever detection won the primary rank. A waiver written for the gitleaks
+    match alone was never reviewed against trufflehog's evidence — and that
+    evidence is `Verified: true`, a credential proven live. Letting the gitleaks
+    waiver carry the merged record through the gate would mean a second scanner
+    confirming the leak is what silenced the alarm.
+    """
+    aws = next(f for f in findings.findings if f.secret_type == "aws-access-key")
+    assert aws.rule == "gitleaks:aws-access-token"
+    assert "trufflehog:AWS" in aws.corroborated_rules
+    assert aws.verified is True
+
+    outcome = reconcile(
+        findings,
+        _waivers(_waiver(rule="gitleaks:aws-access-token")),
+        today=TODAY,
+        fail_on="high",
+    )
+
+    assert outcome.waived == []
+    assert outcome.failed is True
+    assert outcome.exit_code == 1
+    assert [w.id for w in outcome.unused_waivers] == ["WV-2026-001"]
 
 
 def test_an_expired_waiver_does_not_suppress_and_fails_the_gate(findings):
@@ -87,7 +121,7 @@ def test_an_expired_waiver_does_not_suppress_and_fails_the_gate(findings):
 def test_an_expired_waiver_is_named_on_the_finding_it_used_to_cover(findings):
     outcome = reconcile(
         findings,
-        _waivers(_waiver(expires_at="2026-08-03")),
+        _waivers(_waiver(rule="secret-type:aws-access-key", expires_at="2026-08-03")),
         today=TODAY,
         fail_on="high",
     )
@@ -99,7 +133,7 @@ def test_an_expired_waiver_is_named_on_the_finding_it_used_to_cover(findings):
 def test_a_waiver_expiring_today_is_still_active(findings):
     outcome = reconcile(
         findings,
-        _waivers(_waiver(expires_at=TODAY.isoformat())),
+        _waivers(_waiver(rule="secret-type:aws-access-key", expires_at=TODAY.isoformat())),
         today=TODAY,
         fail_on="high",
     )
@@ -132,7 +166,7 @@ def test_a_waiver_path_glob_scopes_to_a_directory(findings):
 
 
 def test_a_waiver_for_the_wrong_scanner_does_not_apply(findings):
-    """The AWS finding merges under gitleaks, so a trufflehog-only waiver misses it."""
+    """A trufflehog-only waiver covers none of the AWS finding's other detections."""
     outcome = reconcile(
         findings,
         _waivers(_waiver(rule="trufflehog:AWS")),
