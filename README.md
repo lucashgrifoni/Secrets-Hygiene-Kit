@@ -1,92 +1,142 @@
 # Secrets Hygiene Kit
 
-`secguard` turns secret-scanner reports into a build decision and a response checklist.
-It combines findings from Gitleaks, TruffleHog and detect-secrets, applies expiring
-waivers, and exports JSON, SARIF or Markdown for review.
+[![CI](https://github.com/lucashgrifoni/secrets-hygiene-kit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/lucashgrifoni/secrets-hygiene-kit/actions/workflows/ci.yml)
+
+[0.3.0 beta](https://github.com/lucashgrifoni/secrets-hygiene-kit/releases/tag/v0.3.0)
+· Python 3.12 / 3.13 / 3.14 · [Apache-2.0](LICENSE)
+
+**Turn secret-scanner reports into consistent CI decisions and response guidance.**
+
+Secrets Hygiene Kit is a Python CLI, `secguard`, for development and AppSec teams
+working with Gitleaks, TruffleHog and detect-secrets. It combines their findings,
+applies expiring exceptions and produces reports that reviewers can act on.
 
 Detection runs in your scanner. Credential changes remain with the authorized
-responder. secguard reads reports and never contacts a credential provider.
+responder. secguard processes reports locally and never contacts a credential provider.
+
+[Install](#install-030) · [Quickstart](#quickstart) · [CLI](#cli-reference) ·
+[CI integration](#ci-integration) · [Documentation](#documentation)
+
+## What it does
+
+| Capability | Result |
+| --- | --- |
+| Normalize scanner reports | A canonical finding set from Gitleaks JSON, TruffleHog JSON/JSON Lines and detect-secrets baselines |
+| Combine detector evidence | Findings at the same type, path and line retain the strongest severity and every contributing rule |
+| Enforce exception policy | Expiring waivers, partial-scope notices and a blocking decision for expired waivers |
+| Evaluate a CI threshold | Predictable exit codes for passing, blocking and processing errors |
+| Export review artifacts | JSON, SARIF 2.1.0, Markdown and a PR comment draft |
+| Support incident response | 13 provider and secret-type playbooks, incident checklists and review-date checks |
+| Set up a repository | Pre-commit and GitHub/GitLab CI starters that preserve existing files |
+
+The adapters also accept synthetic reports for testing. secguard writes report
+files and comment drafts; your workflow controls their upload or publication.
 
 ## Install 0.3.0
 
-Use Python 3.12, 3.13 or 3.14 on Linux or Windows.
+The current release is **0.3.0 beta**, tested on Linux and Windows with
+Python **3.12, 3.13 and 3.14**. Install the versioned wheel from
+[GitHub Releases](https://github.com/lucashgrifoni/secrets-hygiene-kit/releases/tag/v0.3.0).
 
-Create a virtual environment and install the versioned wheel from the
-[0.3.0 release](https://github.com/lucashgrifoni/secrets-hygiene-kit/releases/tag/v0.3.0):
+Create a virtual environment:
 
 ```console
 python -m venv .venv
 ```
 
-On Linux:
+### Linux
 
 ```console
 .venv/bin/python -m pip install https://github.com/lucashgrifoni/secrets-hygiene-kit/releases/download/v0.3.0/secrets_hygiene_kit-0.3.0-py3-none-any.whl
 .venv/bin/secguard version
 ```
 
-On Windows:
+### Windows
 
 ```console
-.venv\Scripts\python.exe -m pip install https://github.com/lucashgrifoni/secrets-hygiene-kit/releases/download/v0.3.0/secrets_hygiene_kit-0.3.0-py3-none-any.whl
-.venv\Scripts\secguard.exe version
+.\.venv\Scripts\python.exe -m pip install https://github.com/lucashgrifoni/secrets-hygiene-kit/releases/download/v0.3.0/secrets_hygiene_kit-0.3.0-py3-none-any.whl
+.\.venv\Scripts\secguard.exe version
 ```
 
-The release includes a source archive, SHA-256 checksums, a dependency inventory
-and build provenance. The package is distributed through GitHub Releases;
-there is no PyPI release. Use the environment's `secguard` executable for the
-commands below.
+The version command prints `0.3.0`. In the examples below, replace `secguard`
+with `.venv/bin/secguard` on Linux or `.\.venv\Scripts\secguard.exe` on Windows,
+or activate that virtual environment first.
 
-## First use
+The release also includes a source archive, SHA-256 checksums, a dependency
+inventory and build provenance. Distribution is through GitHub Releases;
+the package has no PyPI release.
 
-Run your chosen scanner and keep its failure status visible. For example,
-Gitleaks can write findings without using them as its process exit status:
+## Quickstart
+
+### 1. Create the local policy
+
+```console
+secguard init . --ci none
+```
+
+This creates the waiver policy and pre-commit starter. Existing files are
+preserved. Choose `--ci github`, `gitlab` or `both` to include CI starters;
+configure their scanner steps before use.
+
+### 2. Collect a scanner report
+
+Install and pin a scanner version your team has reviewed. For
+[Gitleaks](https://github.com/gitleaks/gitleaks#usage):
 
 ```console
 gitleaks git --redact --exit-code 0 --report-format json --report-path gitleaks.json
-secguard scan check --input gitleaks.json --fail-on high
 ```
 
-Gitleaks operational errors still stop the scanner step. Pin and install the
-scanner version your team reviewed separately.
+`--exit-code 0` leaves the finding threshold to secguard. Gitleaks operational
+errors must still stop the scanner step. Run the scanner successfully before
+evaluating its report.
 
-| Exit | Meaning |
-| --- | --- |
-| `0` | no active finding reached the threshold and no waiver expired |
-| `1` | findings or expired waivers blocked the gate |
-| `2` | input, policy or output could not be processed |
+### 3. Evaluate findings and export the results
 
-A clean report is evidence about that scanner run and its scope. It does not
-prove the repository contains no secrets. Empty TruffleHog output is accepted
-with a notice; the preceding scanner step must succeed.
+```console
+secguard scan check --input gitleaks.json --fail-on high --json findings.json --sarif secguard.sarif --markdown report.md
+```
 
-See the [quickstart](docs/quickstart.md) for setup, report formats and CI.
+The gate blocks on active findings at or above `high`, or on any expired waiver.
+Reports retain waived findings for review.
 
-## Capabilities
+To combine reports, repeat `--input`:
 
-- Read Gitleaks JSON, TruffleHog JSON/JSON Lines, detect-secrets baselines and
-  synthetic test reports.
-- Map detector rules to 13 canonical secret types and response playbooks.
-- Combine findings at the same type, path and line, preserving the strongest
-  severity and each contributing detector rule.
-- Require every contributing rule to be covered before a waiver suppresses
-  a combined finding.
-- Block on expired waivers and warn about unused or partial scopes.
-- Export JSON, SARIF 2.1.0, a Markdown report or a PR comment draft.
-- Create pre-commit and CI starters without overwriting existing files.
-- Print response checklists and check playbook review dates.
+```console
+secguard scan check --input gitleaks.json --input trufflehog.jsonl --input .secrets.baseline --fail-on high
+```
+
+| Exit code | Meaning | CI handling |
+| --- | --- | --- |
+| `0` | No active finding reached the threshold and no waiver expired | Continue |
+| `1` | Findings or expired waivers blocked the gate | Review findings and policy |
+| `2` | Input, policy or output could not be processed | Correct the error before accepting a scan result |
+
+A clean report describes that scanner run and its scope. It does not establish
+that a repository contains no secrets. Empty TruffleHog output is accepted with
+a notice; its preceding scanner step must succeed.
+
+See the [full quickstart](docs/quickstart.md) for report collection, exports,
+exceptions and troubleshooting.
+
+## CLI reference
 
 | Command | Purpose |
 | --- | --- |
-| `secguard init [dir] --ci github\|gitlab\|both\|none` | create starter files |
-| `secguard scan check --input FILE...` | combine reports and enforce the gate |
-| `secguard scan normalize --input FILE` | export canonical findings |
-| `secguard report --input FILE...` | write a report without a finding threshold |
-| `secguard waivers check\|list\|add` | manage expiring exceptions |
-| `secguard playbooks list\|show\|check` | inspect response guidance |
-| `secguard incident start --secret-type TYPE` | generate an incident checklist |
+| `secguard init [dir] --ci github\|gitlab\|both\|none` | Create policy, pre-commit and optional CI starters |
+| `secguard scan check --input FILE [--input FILE]` | Combine reports, apply waivers and enforce the threshold |
+| `secguard scan normalize --input FILE` | Export canonical findings as JSON |
+| `secguard report --input FILE [--input FILE]` | Render Markdown without a finding threshold |
+| `secguard waivers check\|list\|add` | Validate, inspect or add expiring exceptions |
+| `secguard playbooks list\|show\|check` | Inspect response guidance and review dates |
+| `secguard incident start --secret-type TYPE` | Generate an incident checklist |
+| `secguard version` | Print the installed version |
 
-## Exception policy
+Run `secguard --help` or add `--help` to a command for its options.
+
+## Waiver policy
+
+Store reviewed exceptions in `.secguard/waivers.yaml`:
 
 ```yaml
 schema: "secguard.waiver/v1"
@@ -100,93 +150,133 @@ waivers:
     approver: security-lead
 ```
 
-A waiver records an owner and approver; secguard does not authenticate them or
-replace your review process. Protect the waiver file in your repository.
+The date is an example. Choose a future expiry when creating a waiver.
 
-`*` stays within a path segment; `**` crosses directories. Expired waivers
-suppress nothing and block the gate even if they match no current finding.
-New waivers created through the CLI must expire in the future within 365 days;
-expiries beyond 90 days produce a warning.
+- `*` matches within a path segment; `**` can cross directories.
+- Expired waivers suppress nothing and block the gate, even without a matching finding.
+- New waivers added through the CLI must expire within 365 days. Expiries beyond
+  90 days produce a warning.
+- Detector-scoped waivers must collectively cover every rule in a combined
+  finding. Partial coverage leaves the finding active and produces a notice.
+- A canonical `secret-type:` scope covers that type across detectors and requires
+  review of the contributing evidence.
 
-Detector-scoped waivers must collectively cover every rule in a combined
-finding. A canonical `secret-type:` scope covers the type across detectors
-and requires review of the added evidence.
+Owner and approver fields record your review process; secguard does not
+authenticate those identities. Protect waiver changes through repository review.
+Use the [waiver request template](docs/waiver-request-template.md) to document a decision.
 
-## Classification and severity
+## CI integration
 
-The packaged catalog maps reviewed detector rule identifiers. Unmapped rules
-use a generic playbook and carry `mapping: fallback`.
+### GitHub Actions
 
-A TruffleHog `Verified: true` field raises severity to Critical. This imports
-the detector's claim at scan time; secguard performs no fresh verification.
-
-Catalog overrides can lower severity, so they require an explicit `--rules`
-argument and emit a warning for reductions. A file merely present at
-`.secguard/rules.yaml` is not automatically loaded.
-
-```console
-secguard scan check --input gitleaks.json --rules .secguard/rules.yaml
-```
-
-## GitHub Action
-
-The composite action installs this package from its own versioned checkout.
-Reports take one path per line, including paths containing spaces.
+The composite action installs secguard from the selected revision and evaluates
+existing reports. Add these steps after checking out your repository and installing
+a reviewed Gitleaks version. The action is pinned to the `v0.3.0` release commit:
 
 ```yaml
 - name: Collect Gitleaks report
   run: gitleaks git --redact --exit-code 0 --report-format json --report-path gitleaks.json
 
-- uses: lucashgrifoni/secrets-hygiene-kit@v0.3.0
+- name: Evaluate secret findings
+  uses: lucashgrifoni/secrets-hygiene-kit@52cca0f5c203cf2ddaabbbe89007161229cf476f # v0.3.0
   with:
     reports: gitleaks.json
     fail-on: high
 ```
 
-Install a reviewed scanner before the first step. Pin the secguard action to the
-release commit SHA when your dependency policy requires immutable references.
-Missing reports fail by default. `allow-missing-reports: true` explicitly
-permits a run without coverage and reports `NO-REPORTS`, rather than `PASS`.
+The action's default outputs are `secguard.sarif`, `secguard-report.md` and
+`secguard-comment.md`.
+Provide multiple reports as one path per line; paths may contain spaces.
 
-`secguard init --ci gitlab` produces an includable GitLab snippet. The starter
-scanner steps are comments for your team to configure.
+The action skips individual missing paths and fails if no listed report exists.
+`allow-missing-reports: true` explicitly permits that case and reports
+`NO-REPORTS`. Keep the default when CI requires scanner coverage.
 
-## Response playbooks
+See [action.yml](action.yml) for inputs, output paths and the playbook freshness check.
 
-The package contains guidance for AWS access keys, AWS secret access keys,
-GitHub PATs and App keys, Slack bot tokens and webhooks, Stripe secret keys,
-GCP service-account JSON, Azure Storage keys, PostgreSQL URIs, JWT signing keys,
-generic private keys and generic API keys.
+### GitLab CI
 
-Each playbook has a review date and the same sections: identify, invalidate,
-rotate, audit usage, communicate and close. The containment mechanism and
-replacement order depend on the provider and the incident. Follow the
+```console
+secguard init . --ci gitlab
+```
+
+This generates `.gitlab/secguard.gitlab-ci.yml`, an includable GitLab snippet.
+Configure and install the scanner steps before using it; the generated detector
+examples are comments.
+
+## Classification and response
+
+The packaged catalog maps reviewed detector rule identifiers to canonical
+secret types. Unmapped rules use a generic playbook and carry `mapping: fallback`.
+TruffleHog's `Verified: true` raises severity to Critical; it is a claim imported
+from the detector report, without fresh verification by secguard.
+
+Catalog overrides require an explicit `--rules` argument:
+
+```console
+secguard scan check --input gitleaks.json --rules .secguard/rules.yaml
+```
+
+A file at `.secguard/rules.yaml` is not loaded automatically. Overrides that
+lower severity emit a warning and need review alongside the waiver policy.
+
+The 13 response playbooks cover:
+
+| Provider or category | Secret types |
+| --- | --- |
+| AWS | Access keys and secret access keys |
+| GitHub | Personal access tokens and App private keys |
+| Slack | Bot tokens and webhooks |
+| Stripe | Secret keys |
+| Google Cloud | Service-account JSON |
+| Azure | Storage keys |
+| Database and application | PostgreSQL URIs and JWT signing keys |
+| Generic | Private keys and API keys |
+
+Each playbook records a review date and covers identification, invalidation,
+rotation, usage audit, communication and closure. Provider containment and
+replacement order depend on the incident. Follow the
 [incident guide](docs/incident-flow.md) and confirm current provider guidance.
 
-## Data handling and limits
+## Data handling and operating limits
 
-Adapters discard known credential fields such as `Secret`, `Match`,
-`Raw`, `RawV2` and `hashed_secret`. They retain selected metadata needed
-for review. Do not place credentials in paths, identifiers, descriptions,
-waiver reasons or other metadata: secguard is not a universal secret scrubber.
+Adapters discard known credential fields, including `Secret`, `Match`, `Raw`,
+`RawV2` and `hashed_secret`, while retaining selected review metadata. Keep
+credentials out of paths, identifiers, descriptions, waiver reasons and other
+metadata. Review exported reports before sharing them.
 
-Tests cover credential canaries, malformed payloads, terminal control
-characters, Markdown escaping, directory-aware waiver scope, and writes
-through symlinks or Windows junctions. These checks do not establish safety
-under concurrent filesystem mutation by another process.
+| Limit | Effect |
+| --- | --- |
+| 64 MiB per input report | Larger reports exit with a processing error before JSON parsing; use smaller repository scopes |
+| In-memory parsing | The input limit does not impose an aggregate memory limit on parsing or combined findings |
+| Type, path and line matching | Different reported lines can produce separate findings; location-derived detect-secrets fingerprints change when code moves |
+| Filesystem write guards | Symlinks and Windows junctions are checked; concurrent destination changes remain outside the guarantee |
 
-Each input report is limited to 64 MiB. Larger inputs exit with a processing
-error before JSON parsing. Collect reports in smaller repository scopes when
-that budget is exceeded; parsing and canonical findings still use memory.
+Tests cover credential canaries, malformed payloads, terminal control characters,
+Markdown escaping, directory-aware waiver scope and linked output destinations.
+secguard is not a universal secret scrubber. SARIF severity overrides use stable
+severity suffixes; see the [migration notes](CHANGELOG.md#migration-notes).
 
-Findings combine by type, normalized path and line. Different reported lines
-can produce separate findings. Location-derived detect-secrets fingerprints
-change when code moves. For severity overrides, SARIF IDs include a stable
-severity suffix; see the [migration notes](CHANGELOG.md).
+## Documentation
 
-Report vulnerabilities through [SECURITY.md](SECURITY.md). Contribution and
-extension guidance is in [CONTRIBUTING.md](CONTRIBUTING.md).
+| Guide | Use it for |
+| --- | --- |
+| [Quickstart](docs/quickstart.md) | End-to-end setup, scanner reports and troubleshooting |
+| [Incident response](docs/incident-flow.md) | Containment, rotation and closure guidance |
+| [Adding a playbook](docs/adding-playbook.md) | Extending response guidance and rule mappings |
+| [Waiver request](docs/waiver-request-template.md) | Recording an exception for review |
+| [Changelog](CHANGELOG.md) | Release changes and migration notes |
+| [Project status](STATUS.md) | Current scope and known limitations |
+
+## Contributing and security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, tests and extension
+requirements. Use synthetic fixtures when reporting problems or adding examples.
+
+For vulnerabilities, use the private reporting channel described in
+[SECURITY.md](SECURITY.md). Never include live credentials or sensitive scanner
+reports in public issues.
 
 ## License
 
-[Apache-2.0](LICENSE).
+Licensed under [Apache-2.0](LICENSE).
