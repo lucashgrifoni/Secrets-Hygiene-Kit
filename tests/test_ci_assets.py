@@ -420,9 +420,13 @@ def test_a_pre_gate_failure_cannot_claim_that_no_reports_were_found(action):
         ("pull_request", "skipped", "build", 1),
         ("pull_request", "skipped", "security", 1),
         ("pull_request", "skipped", "self-check", 1),
+        ("pull_request", "skipped", "pr-comment", 1),
     ],
 )
-def test_release_check_runs_its_real_assertions(event, provenance, failed_job, expected, tmp_path):
+@pytest.mark.parametrize("trusted", [False, True])
+def test_release_check_runs_its_real_assertions(
+    event, provenance, failed_job, expected, trusted, tmp_path
+):
     workflow = yaml.safe_load(
         (REPOSITORY_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     )
@@ -433,6 +437,9 @@ def test_release_check_runs_its_real_assertions(event, provenance, failed_job, e
     script = body.split("<<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
     results = {name: {"result": "success"} for name in job["needs"]}
     results["provenance"]["result"] = provenance
+    results["pr-comment"]["result"] = (
+        "success" if trusted and event == "pull_request" else "skipped"
+    )
     if failed_job is not None:
         results[failed_job]["result"] = "cancelled"
     result = subprocess.run(
@@ -443,6 +450,11 @@ def test_release_check_runs_its_real_assertions(event, provenance, failed_job, e
             "RESULTS": json.dumps(results),
             "EVENT_NAME": event,
             "REF": "refs/heads/main",
+            "PR_HEAD_REPOSITORY": (
+                "lucashgrifoni/secrets-hygiene-kit" if trusted else "fork/secrets-hygiene-kit"
+            ),
+            "PR_AUTHOR": "lucashgrifoni" if trusted else "contributor",
+            "ACTOR": "lucashgrifoni" if trusted else "contributor",
         },
         capture_output=True,
         text=True,
@@ -450,3 +462,34 @@ def test_release_check_runs_its_real_assertions(event, provenance, failed_job, e
         timeout=30,
     )
     assert result.returncode == expected, result.stderr
+
+
+@pytest.mark.parametrize("field", ["PR_HEAD_REPOSITORY", "PR_AUTHOR", "ACTOR"])
+def test_release_check_agrees_with_github_case_insensitive_identity(field, tmp_path):
+    workflow = yaml.safe_load(
+        (REPOSITORY_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    )
+    body = workflow["jobs"]["release-checks"]["steps"][0]["run"]
+    script = body.split("<<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
+    results = {name: {"result": "success"} for name in workflow["jobs"]["release-checks"]["needs"]}
+    results["provenance"]["result"] = "skipped"
+    environment = {
+        **os.environ,
+        "RESULTS": json.dumps(results),
+        "EVENT_NAME": "pull_request",
+        "REF": "refs/heads/main",
+        "PR_HEAD_REPOSITORY": "lucashgrifoni/secrets-hygiene-kit",
+        "PR_AUTHOR": "lucashgrifoni",
+        "ACTOR": "lucashgrifoni",
+    }
+    environment[field] = environment[field].upper()
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr

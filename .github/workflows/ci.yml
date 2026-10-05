@@ -166,7 +166,7 @@ jobs:
       - name: Scan application source with Bandit
         run: |
           mkdir -p reports
-          python -m bandit --recursive src --format json --output reports/bandit.json
+          python -m bandit --recursive src scripts/post_pr_comment.py --format json --output reports/bandit.json
 
       - name: Upload source scan evidence
         if: always() && hashFiles('reports/bandit.json') != ''
@@ -353,6 +353,102 @@ jobs:
                   raise SystemExit(f"fixture canary leaked into {name}")
           PY
 
+  pr-comment:
+    name: PR comment publication contract
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == 'lucashgrifoni/secrets-hygiene-kit' &&
+      github.event.pull_request.user.login == 'lucashgrifoni' &&
+      github.actor == 'lucashgrifoni'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Check out the authorized same-repository head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Prepare a clean detector report
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          Path("comment-clean.json").write_text("[]", encoding="utf-8")
+          PY
+
+      - name: Publish a passing summary
+        id: pass
+        uses: ./
+        with:
+          reports: comment-clean.json
+          publish-pr-comment: "true"
+          comment-repository: lucashgrifoni/secrets-hygiene-kit
+          comment-marker: secguard-validation
+
+      - name: Publish a blocking summary while preserving failure
+        id: block
+        continue-on-error: true
+        uses: ./
+        with:
+          reports: tests/fixtures/gitleaks-report.json
+          publish-pr-comment: "true"
+          comment-repository: lucashgrifoni/secrets-hygiene-kit
+          comment-marker: secguard-validation
+
+      - name: Replay the exact blocking summary artifact
+        id: replay
+        env:
+          SECGUARD_PUBLISH_COMMENT: "true"
+          SECGUARD_COMMENT_FILE: secguard-comment.md
+          SECGUARD_EXPECTED_REPOSITORY: lucashgrifoni/secrets-hygiene-kit
+          SECGUARD_COMMENT_MARKER: secguard-validation
+          SECGUARD_COMMENT_AUTHOR: github-actions[bot]
+          SECGUARD_VERDICT: ${{ steps.block.outputs.verdict }}
+          SECGUARD_REPORTS_FOUND: ${{ steps.block.outputs.reports-found }}
+          SECGUARD_PR_NUMBER: ${{ github.event.pull_request.number }}
+          SECGUARD_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SECGUARD_PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          SECGUARD_TOKEN: ${{ github.token }}
+        run: python3 -I scripts/post_pr_comment.py
+
+      - name: Verify verdicts, one comment, and idempotent publication
+        if: always()
+        env:
+          PASS_OUTCOME: ${{ steps.pass.outcome }}
+          PASS_VERDICT: ${{ steps.pass.outputs.verdict }}
+          PASS_STATUS: ${{ steps.pass.outputs.comment-status }}
+          PASS_ID: ${{ steps.pass.outputs.comment-id }}
+          BLOCK_OUTCOME: ${{ steps.block.outcome }}
+          BLOCK_VERDICT: ${{ steps.block.outputs.verdict }}
+          BLOCK_STATUS: ${{ steps.block.outputs.comment-status }}
+          BLOCK_ID: ${{ steps.block.outputs.comment-id }}
+          REPLAY_OUTCOME: ${{ steps.replay.outcome }}
+          REPLAY_STATUS: ${{ steps.replay.outputs.status }}
+          REPLAY_ID: ${{ steps.replay.outputs.comment-id }}
+        run: |
+          python3 - <<'PY'
+          import os
+          if (os.environ["PASS_OUTCOME"], os.environ["PASS_VERDICT"]) != ("success", "PASS"):
+              raise SystemExit("passing summary did not pass")
+          if os.environ["PASS_STATUS"] not in {"created", "updated", "unchanged"}:
+              raise SystemExit("passing summary was not published")
+          if (os.environ["BLOCK_OUTCOME"], os.environ["BLOCK_VERDICT"]) != ("failure", "BLOCK"):
+              raise SystemExit("publication masked the blocking gate")
+          if os.environ["REPLAY_OUTCOME"] != "success":
+              raise SystemExit("exact artifact replay did not succeed")
+          if os.environ["BLOCK_STATUS"] not in {"updated", "unchanged"}:
+              raise SystemExit("blocking summary was not published")
+          if os.environ["REPLAY_STATUS"] != "unchanged":
+              raise SystemExit("identical replay changed the comment")
+          ids = [os.environ[f"{prefix}_ID"] for prefix in ("PASS", "BLOCK", "REPLAY")]
+          if not all(item.isdigit() for item in ids) or len(set(ids)) != 1:
+              raise SystemExit("publication duplicated or failed to identify the comment")
+          print("PR comment contract passed")
+          PY
+
   provenance:
     name: Attest trusted main build
     needs: [build, test, security, self-check, action]
@@ -387,7 +483,7 @@ jobs:
   release-checks:
     name: Release checks
     if: always()
-    needs: [build, test, security, self-check, action, provenance]
+    needs: [build, test, security, self-check, action, pr-comment, provenance]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -396,6 +492,9 @@ jobs:
           RESULTS: ${{ toJSON(needs) }}
           EVENT_NAME: ${{ github.event_name }}
           REF: ${{ github.ref }}
+          PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          ACTOR: ${{ github.actor }}
         run: |
           python3 - <<'PY'
           import json
@@ -409,5 +508,14 @@ jobs:
           expected = "success" if trusted_push else "skipped"
           if results["provenance"]["result"] != expected:
               raise SystemExit(f"provenance: {results['provenance']['result']}, expected {expected}")
+          trusted_pr = (
+              os.environ["EVENT_NAME"] == "pull_request"
+              and os.environ["PR_HEAD_REPOSITORY"].casefold() == "lucashgrifoni/secrets-hygiene-kit"
+              and os.environ["PR_AUTHOR"].casefold() == "lucashgrifoni"
+              and os.environ["ACTOR"].casefold() == "lucashgrifoni"
+          )
+          expected_comment = "success" if trusted_pr else "skipped"
+          if results["pr-comment"]["result"] != expected_comment:
+              raise SystemExit(f"pr-comment: {results['pr-comment']['result']}, expected {expected_comment}")
           print("Release checks passed")
           PY
