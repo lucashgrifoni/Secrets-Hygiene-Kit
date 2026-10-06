@@ -1,0 +1,24 @@
+site_name: Secrets Hygiene Kit
+site_url: https://lucashgrifoni.github.io/Secrets-Hygiene-Kit/
+repo_url: https://github.com/lucashgrifoni/secrets-hygiene-kit
+repo_name: lucashgrifoni/secrets-hygiene-kit
+site_description: secguard CLI documentation, CI integration and response guidance
+docs_dir: docs
+site_dir: site
+theme:
+  name: mkdocs
+  highlightjs: true
+markdown_extensions:
+  - tables
+  - fenced_code
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Demonstration: demo.md
+  - Incident response: incident-flow.md
+  - Playbooks: adding-playbook.md
+  - Waiver request: waiver-request-template.md
+  - Detector compatibility: detector-compatibility.md
+  - PR comments: pr-comments.md
+  - Remediation Hub: remediation-hub.md
+  - Repository CI: repository-ci.md

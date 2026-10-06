@@ -1,0 +1,434 @@
+name: Security CI/CD
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  merge_group:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  semgrep:
+    name: SAST - Semgrep
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@351661ca32ac09a36dc5ee2d536e3128f2a3c8ed # v2.22.0
+        with:
+          egress-policy: audit
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Install Semgrep
+        run: python -m pip install --disable-pip-version-check semgrep==1.179.0
+      - name: Scan Python source, scripts, action and workflows
+        run: |
+          mkdir -p reports
+          semgrep scan --config p/security-audit --config p/github-actions \
+            --severity WARNING --severity ERROR --error --strict --metrics=off \
+            --json-output reports/semgrep.json --sarif-output reports/semgrep.sarif \
+            src scripts .github action.yml
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("reports/semgrep.json").read_text())
+          if report.get("errors") or not report.get("paths", {}).get("scanned"):
+              raise SystemExit("Semgrep failed or examined no files")
+          print(f"Semgrep examined {len(report['paths']['scanned'])} files")
+          PY
+      - name: Preserve security evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-semgrep
+          path: reports/
+          if-no-files-found: error
+          retention-days: 14
+
+  codeql:
+    name: SAST - CodeQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@351661ca32ac09a36dc5ee2d536e3128f2a3c8ed # v2.22.0
+        with:
+          egress-policy: audit
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Initialize CodeQL for Python
+        uses: github/codeql-action/init@9e0d7b8d25671d64c341c19c0152d693099fb5ba # v4.35.5
+        with:
+          languages: python
+          build-mode: none
+          queries: security-extended
+      - name: Analyze without granting the scanner a write token
+        uses: github/codeql-action/analyze@9e0d7b8d25671d64c341c19c0152d693099fb5ba # v4.35.5
+        with:
+          upload: false
+          output: reports/codeql
+          category: /language:python
+      - name: Block medium and higher findings
+        run: python scripts/check_security_reports.py sarif reports/codeql/python.sarif --tool CodeQL
+      - name: Preserve security evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-codeql
+          path: reports/codeql/
+          if-no-files-found: error
+          retention-days: 14
+
+  dependencies:
+    name: SCA and SBOM
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@351661ca32ac09a36dc5ee2d536e3128f2a3c8ed # v2.22.0
+        with:
+          egress-policy: audit
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Install verified Trivy
+        run: |
+          curl --fail --silent --show-error --location \
+            https://github.com/aquasecurity/trivy/releases/download/v0.75.0/trivy_0.75.0_Linux-64bit.tar.gz \
+            --output "$RUNNER_TEMP/trivy.tar.gz"
+          echo "c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f  $RUNNER_TEMP/trivy.tar.gz" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/trivy-bin"
+          tar -xzf "$RUNNER_TEMP/trivy.tar.gz" -C "$RUNNER_TEMP/trivy-bin" trivy
+          echo "$RUNNER_TEMP/trivy-bin" >> "$GITHUB_PATH"
+      - name: Resolve runtime, contributor and documentation dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -e ".[dev]" -r requirements/docs.txt pip-audit==2.10.1
+          mkdir -p reports "$RUNNER_TEMP/security-dependencies"
+          python -m pip freeze --exclude-editable > "$RUNNER_TEMP/security-dependencies/requirements.txt"
+      - name: Audit the installed dependency environment
+        run: >-
+          python -m pip_audit --requirement "${{ runner.temp }}/security-dependencies/requirements.txt"
+          --strict --no-deps --disable-pip --progress-spinner off
+          --format json --output reports/pip-audit.json
+      - name: Trivy audit of resolved dependencies, including unfixed advisories
+        run: |
+          trivy fs --scanners vuln --severity MEDIUM,HIGH,CRITICAL,UNKNOWN \
+            --exit-code 1 --list-all-pkgs --format json --output reports/trivy-dependencies.json \
+            "$RUNNER_TEMP/security-dependencies"
+          python scripts/check_security_reports.py trivy-dependencies reports/trivy-dependencies.json
+      - name: Generate CycloneDX dependency inventory
+        run: |
+          trivy fs --scanners vuln --format cyclonedx --output reports/dependencies.cdx.json \
+            "$RUNNER_TEMP/security-dependencies"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("reports/dependencies.cdx.json").read_text())
+          if report.get("bomFormat") != "CycloneDX" or not report.get("components"):
+              raise SystemExit("missing dependency inventory")
+          PY
+      - name: Preserve security evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-dependencies
+          path: reports/
+          if-no-files-found: error
+          retention-days: 14
+
+  workflows:
+    name: Workflow security and lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@351661ca32ac09a36dc5ee2d536e3128f2a3c8ed # v2.22.0
+        with:
+          egress-policy: audit
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Install zizmor and verified actionlint
+        run: |
+          python -m pip install --disable-pip-version-check zizmor==1.30.1
+          curl --fail --silent --show-error --location \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz \
+            --output "$RUNNER_TEMP/actionlint.tar.gz"
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/actionlint-bin"
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP/actionlint-bin" actionlint
+          echo "$RUNNER_TEMP/actionlint-bin" >> "$GITHUB_PATH"
+      - name: Validate workflow syntax
+        run: actionlint -color
+      - name: Audit workflow permissions and unsafe execution paths
+        run: |
+          mkdir -p reports
+          zizmor --offline --strict-collection --min-severity medium --min-confidence low \
+            --format sarif .github/workflows action.yml > reports/zizmor.sarif
+          python scripts/check_security_reports.py sarif reports/zizmor.sarif --tool zizmor
+      - name: Preserve security evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-workflows
+          path: reports/
+          if-no-files-found: error
+          retention-days: 14
+
+  secrets:
+    name: Secrets - history and filesystem
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@351661ca32ac09a36dc5ee2d536e3128f2a3c8ed # v2.22.0
+        with:
+          egress-policy: audit
+      - name: Checkout complete history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install verified Trivy
+        run: |
+          curl --fail --silent --show-error --location \
+            https://github.com/aquasecurity/trivy/releases/download/v0.75.0/trivy_0.75.0_Linux-64bit.tar.gz \
+            --output "$RUNNER_TEMP/trivy.tar.gz"
+          echo "c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f  $RUNNER_TEMP/trivy.tar.gz" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/trivy-bin"
+          tar -xzf "$RUNNER_TEMP/trivy.tar.gz" -C "$RUNNER_TEMP/trivy-bin" trivy
+          echo "$RUNNER_TEMP/trivy-bin" >> "$GITHUB_PATH"
+      - name: Install verified Gitleaks
+        run: |
+          curl --fail --silent --show-error --location \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+            --output "$RUNNER_TEMP/gitleaks.tar.gz"
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $RUNNER_TEMP/gitleaks.tar.gz" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/gitleaks-bin"
+          tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP/gitleaks-bin" gitleaks
+          echo "$RUNNER_TEMP/gitleaks-bin" >> "$GITHUB_PATH"
+      - name: Verify both scanners reject a constructed canary
+        run: |
+          python3 - <<'PY'
+          import os
+          import base64
+          import hashlib
+          from pathlib import Path
+          target = Path(os.environ["RUNNER_TEMP"]) / "secret-control"
+          target.mkdir()
+          digest = hashlib.sha256(b"secguard-ci-constructed-scanner-control").digest()
+          token = "ghp_" + base64.b64encode(digest).decode().replace("+", "A").replace("/", "b")[:36]
+          (target / "canary.txt").write_text("Constructed scanner control; not issued by a provider.\n" + token + "\n")
+          PY
+          if gitleaks dir --redact=100 --no-banner --report-format json \
+            --report-path "$RUNNER_TEMP/gitleaks-control.json" "$RUNNER_TEMP/secret-control"; then
+            echo "::error::Gitleaks missed the constructed canary"
+            exit 1
+          else
+            control_status=$?
+            test "$control_status" -eq 1
+          fi
+          if trivy fs --scanners secret --severity MEDIUM,HIGH,CRITICAL,UNKNOWN --exit-code 1 \
+            --format json --output "$RUNNER_TEMP/trivy-control.json" "$RUNNER_TEMP/secret-control"; then
+            echo "::error::Trivy missed the constructed canary"
+            exit 1
+          else
+            control_status=$?
+            test "$control_status" -eq 1
+          fi
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          temp = Path(os.environ["RUNNER_TEMP"])
+          gitleaks = json.loads((temp / "gitleaks-control.json").read_text())
+          trivy = json.loads((temp / "trivy-control.json").read_text())
+          if not gitleaks or not any(target.get("Secrets") for target in trivy.get("Results", [])):
+              raise SystemExit("scanner failed without detecting the canary")
+          Path("reports").mkdir(exist_ok=True)
+          Path("reports/scanner-controls.json").write_text(json.dumps({
+              "constructed": True, "gitleaks_blocked": True, "trivy_blocked": True
+          }) + "\n")
+          print("Both scanner controls produced blocking findings")
+          PY
+      - name: Scan all Git history and redact findings
+        run: |
+          mkdir -p reports
+          gitleaks git --log-opts=--all --redact=100 --no-banner --report-format json --report-path reports/gitleaks.json .
+      - name: Scan tracked source tree with Trivy
+        run: |
+          # Raw Trivy matches stay in runner temp; only a count/rule summary is uploaded.
+          if trivy fs --scanners secret --severity MEDIUM,HIGH,CRITICAL,UNKNOWN \
+            --exit-code 1 --format json --output "$RUNNER_TEMP/trivy-secrets.json" \
+            --skip-dirs .git,.venv,build,dist,site,reports .; then
+            scanner_status=0
+          else
+            scanner_status=$?
+          fi
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          report = json.loads((Path(os.environ["RUNNER_TEMP"]) / "trivy-secrets.json").read_text())
+          results = report.get("Results")
+          allowed_types = {"filesystem", "container_image", "repository"}
+          print(json.dumps({
+              "schema_version": report.get("SchemaVersion") if isinstance(report.get("SchemaVersion"), int) else None,
+              "artifact_type": report.get("ArtifactType") if report.get("ArtifactType") in allowed_types else "unrecognized",
+              "artifact_name_present": isinstance(report.get("ArtifactName"), str) and bool(report["ArtifactName"]),
+              "results_type": type(results).__name__,
+              "result_count": len(results) if isinstance(results, list) else None,
+          }))
+          PY
+          python3 scripts/check_security_reports.py trivy-secrets "$RUNNER_TEMP/trivy-secrets.json" \
+            --scanner-status "$scanner_status" --sanitized-output reports/trivy-secrets-summary.json
+      - name: Preserve security evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-secrets
+          path: reports/
+          if-no-files-found: error
+          retention-days: 14
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@351661ca32ac09a36dc5ee2d536e3128f2a3c8ed # v2.22.0
+        with:
+          egress-policy: audit
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Block newly introduced vulnerable dependencies
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: moderate
+          comment-summary-in-pr: never
+
+  publish:
+    name: Publish security reports
+    needs: [semgrep, codeql, dependencies, workflows, secrets, dependency-review]
+    if: >-
+      !cancelled() &&
+      (
+        (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+        (github.event_name == 'schedule') ||
+        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name == github.repository &&
+         github.event.pull_request.user.login == 'lucashgrifoni' &&
+         github.actor == 'lucashgrifoni')
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@351661ca32ac09a36dc5ee2d536e3128f2a3c8ed # v2.22.0
+        with:
+          egress-policy: audit
+      - name: Download same-run analysis artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: security-*
+          path: reports
+          merge-multiple: true
+      - name: Upload Semgrep
+        uses: github/codeql-action/upload-sarif@9e0d7b8d25671d64c341c19c0152d693099fb5ba # v4.35.5
+        with:
+          sarif_file: reports/semgrep.sarif
+          category: semgrep
+      - name: Upload CodeQL
+        uses: github/codeql-action/upload-sarif@9e0d7b8d25671d64c341c19c0152d693099fb5ba # v4.35.5
+        with:
+          sarif_file: reports/python.sarif
+          category: /language:python
+      - name: Upload workflow analysis
+        uses: github/codeql-action/upload-sarif@9e0d7b8d25671d64c341c19c0152d693099fb5ba # v4.35.5
+        with:
+          sarif_file: reports/zizmor.sarif
+          category: zizmor
+
+  security-checks:
+    name: Security checks
+    if: always()
+    needs: [semgrep, codeql, dependencies, workflows, secrets, dependency-review, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Reject failed, cancelled, missing or unexpectedly skipped security jobs
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          REPOSITORY: ${{ github.repository }}
+          PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          results = json.loads(os.environ["RESULTS"])
+          for job in ("semgrep", "codeql", "dependencies", "workflows", "secrets"):
+              if results[job]["result"] != "success":
+                  raise SystemExit(f"{job} did not pass: {results[job]['result']}")
+          event = os.environ["EVENT_NAME"]
+          expected_review = "success" if event == "pull_request" else "skipped"
+          if results["dependency-review"]["result"] != expected_review:
+              raise SystemExit("dependency review did not reach its expected state")
+          trusted_pr = (
+              event == "pull_request"
+              and os.environ["PR_HEAD_REPOSITORY"].casefold() == os.environ["REPOSITORY"].casefold()
+              and os.environ["PR_AUTHOR"].casefold() == "lucashgrifoni"
+              and os.environ["ACTOR"].casefold() == "lucashgrifoni"
+          )
+          trusted_main = os.environ["REF"] == "refs/heads/main" and event in ("push", "workflow_dispatch")
+          expected_publish = "success" if trusted_pr or trusted_main or event == "schedule" else "skipped"
+          if results["publish"]["result"] != expected_publish:
+              raise SystemExit("security report publication did not reach its expected state")
+          print("Security checks passed")
+          PY

@@ -1,0 +1,5 @@
+# Two SHA-1 hashed_secret fields in the original detect-secrets baseline.
+# Hashes are evidence of synthetic findings, not usable credentials.
+# Exact commit/path/rule/line only; new findings are still blocking.
+9a9e368d967cb1a8fdce55045b22dc736600bdf7:tests/fixtures/detect-secrets-baseline.json:generic-api-key:16
+9a9e368d967cb1a8fdce55045b22dc736600bdf7:tests/fixtures/detect-secrets-baseline.json:generic-api-key:26
