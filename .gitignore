@@ -34,3 +34,7 @@ secguard-comment.md
 
 # Local operational evidence and improvement lifecycle.
 /melhorias/
+
+# Generated documentation and CI evidence.
+/site/
+/reports/

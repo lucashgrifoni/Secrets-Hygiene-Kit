@@ -1,6 +1,6 @@
 # Quickstart
 
-Install the versioned wheel using the [README](../README.md#install-040).
+Install the versioned wheel using the [README](https://github.com/lucashgrifoni/secrets-hygiene-kit/blob/main/README.md#install-040).
 Use the virtual environment's executable for every command below.
 
 ## 1. Create the starter files

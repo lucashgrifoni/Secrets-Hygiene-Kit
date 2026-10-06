@@ -1,7 +1,7 @@
 # Detector compatibility corpus
 
 secguard parses detector reports. The corpus in
-[`tests/fixtures/producer_versions`](../tests/fixtures/producer_versions) records
+[`tests/fixtures/producer_versions`](https://github.com/lucashgrifoni/secrets-hygiene-kit/blob/main/tests/fixtures/producer_versions) records
 formats observed by running pinned producers against synthetic inputs on
 2026-10-05. It provides regression evidence for the cases below.
 
@@ -35,13 +35,13 @@ The Gitleaks generic finding remains a separate low-severity finding.
 
 ## Provenance and redaction
 
-[`producer-lock.json`](../tests/fixtures/producer_versions/producer-lock.json)
+[`producer-lock.json`](https://github.com/lucashgrifoni/secrets-hygiene-kit/blob/main/tests/fixtures/producer_versions/producer-lock.json)
 records the official download URLs, archive hashes, executable hashes and seven
 wheel versions/hashes used for capture. Archive hashes matched both release
 asset digests and the vendors' checksum files. Wheel hashes matched PyPI's
 published digests. Signature verification was not performed.
 
-[`provenance.json`](../tests/fixtures/producer_versions/provenance.json) records
+[`provenance.json`](https://github.com/lucashgrifoni/secrets-hygiene-kit/blob/main/tests/fixtures/producer_versions/provenance.json) records
 producer versions, commands, regeneration-script hash, input hashes, original report hashes, curated
 fixture hashes and observed rule/location metadata. Original reports and
 execution receipts remain in the ignored evidence area. The committed files
@@ -77,7 +77,7 @@ trufflehog filesystem . --json --no-verification --no-update --fail-on-scan-erro
 detect-secrets scan --all-files --no-verify
 ```
 
-The [`regeneration script`](../scripts/regenerate_detector_fixtures.py) creates
+The [`regeneration script`](https://github.com/lucashgrifoni/secrets-hygiene-kit/blob/main/scripts/regenerate_detector_fixtures.py) creates
 the inputs, checks versions and pinned native executable hashes, captures the
 reports and applies the transformations above. It accepts explicit CLI paths:
 
@@ -106,7 +106,7 @@ and [detect-secrets documentation](https://github.com/Yelp/detect-secrets/blob/v
 
 ## Regression checks and limits
 
-[`test_producer_versions.py`](../tests/test_producer_versions.py) contains 26
+[`test_producer_versions.py`](https://github.com/lucashgrifoni/secrets-hygiene-kit/blob/main/tests/test_producer_versions.py) contains 26
 cases covering the recorded corpus. The tests need no producer installation.
 
 | Contract | Cases | Oracle |

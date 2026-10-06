@@ -4,9 +4,50 @@ updates:
     directory: /
     schedule:
       interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/Sao_Paulo
     open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
+      include: scope
+    cooldown:
+      default-days: 7
+    groups:
+      action-minor-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
   - package-ecosystem: pip
     directory: /
     schedule:
       interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/Sao_Paulo
     open-pull-requests-limit: 5
+    commit-message:
+      prefix: deps
+      include: scope
+    cooldown:
+      default-days: 7
+    groups:
+      python-minor-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+  - package-ecosystem: pip
+    directory: /requirements
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/Sao_Paulo
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: docs
+      include: scope
+    cooldown:
+      default-days: 7
+    groups:
+      documentation-minor-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]

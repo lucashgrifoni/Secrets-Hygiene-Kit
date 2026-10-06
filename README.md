@@ -1,6 +1,9 @@
 # Secrets Hygiene Kit
 
 [![CI](https://github.com/lucashgrifoni/secrets-hygiene-kit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/lucashgrifoni/secrets-hygiene-kit/actions/workflows/ci.yml)
+[![Security](https://github.com/lucashgrifoni/secrets-hygiene-kit/actions/workflows/security-ci-cd.yml/badge.svg?branch=main)](https://github.com/lucashgrifoni/secrets-hygiene-kit/actions/workflows/security-ci-cd.yml)
+[![Scorecard](https://github.com/lucashgrifoni/secrets-hygiene-kit/actions/workflows/scorecard.yml/badge.svg?branch=main)](https://github.com/lucashgrifoni/secrets-hygiene-kit/actions/workflows/scorecard.yml)
+[![Documentation](https://github.com/lucashgrifoni/secrets-hygiene-kit/actions/workflows/deploy-github-pages.yml/badge.svg?branch=main)](https://github.com/lucashgrifoni/secrets-hygiene-kit/actions/workflows/deploy-github-pages.yml)
 
 [0.4.0 beta](https://github.com/lucashgrifoni/secrets-hygiene-kit/releases/tag/v0.4.0)
 · Python 3.12 / 3.13 / 3.14 · [Apache-2.0](LICENSE)
@@ -16,6 +19,9 @@ responder. secguard processes reports locally and never contacts a credential pr
 
 [Install](#install-040) · [Quickstart](#quickstart) · [CLI](#cli-reference) ·
 [CI integration](#ci-integration) · [Documentation](#documentation)
+
+[Documentation site](https://lucashgrifoni.github.io/Secrets-Hygiene-Kit/) ·
+[Repository CI and required checks](docs/repository-ci.md)
 
 ## See it work
 
