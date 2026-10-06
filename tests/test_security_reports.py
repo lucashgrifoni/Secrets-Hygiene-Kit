@@ -141,6 +141,7 @@ def test_secret_artifact_carries_counts_and_rules_without_credentials_or_snippet
             }
         ]
     }
+    report.update(SchemaVersion=2, ArtifactType="filesystem", ArtifactName=".")
     summary = sanitize_trivy_secrets(report, 1)
     assert summary["verdict"] == "BLOCK"
     assert summary["blocking_count"] == 1
@@ -148,11 +149,23 @@ def test_secret_artifact_carries_counts_and_rules_without_credentials_or_snippet
 
 
 def test_secret_scan_error_with_zero_findings_cannot_pass():
-    assert sanitize_trivy_secrets({"Results": []}, 2)["verdict"] == "BLOCK"
+    assert (
+        sanitize_trivy_secrets(
+            {"SchemaVersion": 2, "ArtifactType": "filesystem", "ArtifactName": ".", "Results": []},
+            2,
+        )["verdict"]
+        == "BLOCK"
+    )
 
 
 def test_clean_valid_secret_scan_passes():
-    assert sanitize_trivy_secrets({"Results": []}, 0)["verdict"] == "PASS"
+    assert (
+        sanitize_trivy_secrets(
+            {"SchemaVersion": 2, "ArtifactType": "filesystem", "ArtifactName": ".", "Results": []},
+            0,
+        )["verdict"]
+        == "PASS"
+    )
 
 
 def test_scorecard_requires_every_selected_check_to_be_present_and_pass():
@@ -313,7 +326,10 @@ def test_codeql_rule_descriptors_in_extensions_still_block_medium_findings():
 def test_secret_gate_console_has_only_a_fixed_verdict_and_artifact_retains_counts(tmp_path):
     report = tmp_path / "secret-report.json"
     output = tmp_path / "counts.json"
-    report.write_text(json.dumps({"Results": []}), encoding="utf-8")
+    report.write_text(
+        json.dumps({"SchemaVersion": 2, "ArtifactType": "filesystem", "ArtifactName": "."}),
+        encoding="utf-8",
+    )
     result = subprocess.run(
         [
             sys.executable,
@@ -332,3 +348,18 @@ def test_secret_gate_console_has_only_a_fixed_verdict_and_artifact_retains_count
     assert result.returncode == 0
     assert result.stdout.strip() == "trivy-secrets: PASS"
     assert json.loads(output.read_text())["finding_count"] == 0
+
+
+@pytest.mark.parametrize("results", [None, []])
+def test_trivy_clean_report_may_omit_results_but_must_keep_producer_metadata(results):
+    report = {"SchemaVersion": 2, "ArtifactType": "filesystem", "ArtifactName": "."}
+    if results is not None:
+        report["Results"] = results
+    assert sanitize_trivy_secrets(report, 0)["verdict"] == "PASS"
+    assert sanitize_trivy_secrets(report, 2)["verdict"] == "BLOCK"
+
+
+@pytest.mark.parametrize("report", [{}, {"Results": []}, {"SchemaVersion": 2}])
+def test_incomplete_trivy_document_is_not_a_clean_scan(report):
+    with pytest.raises(ValueError):
+        sanitize_trivy_secrets(report, 0)
