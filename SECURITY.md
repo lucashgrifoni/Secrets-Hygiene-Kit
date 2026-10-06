@@ -2,7 +2,8 @@
 
 ## Supported version
 
-Security fixes target the latest 0.3.x release. Earlier versions are superseded.
+Security fixes target the latest 0.4.x release and the current main development line.
+Earlier versions are superseded.
 This is a beta CLI; the supported Python versions are 3.12, 3.13 and 3.14.
 
 ## Report a vulnerability

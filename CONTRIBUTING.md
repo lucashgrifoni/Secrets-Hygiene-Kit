@@ -5,8 +5,8 @@ Use Python 3.12, 3.13 or 3.14 in a virtual environment.
 ```console
 python -m pip install -e ".[dev]"
 python -m pytest
-python -m ruff check src tests scripts
-python -m ruff format --check src tests scripts
+python -m ruff check src tests scripts examples
+python -m ruff format --check src tests scripts examples
 python -m build
 ```
 

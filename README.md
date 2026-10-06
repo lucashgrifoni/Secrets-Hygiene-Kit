@@ -17,6 +17,18 @@ responder. secguard processes reports locally and never contacts a credential pr
 [Install](#install-040) · [Quickstart](#quickstart) · [CLI](#cli-reference) ·
 [CI integration](#ci-integration) · [Documentation](#documentation)
 
+## See it work
+
+![secguard evaluates constructed reports: BLOCK, then PASS](docs/images/secguard-demo.png)
+
+This capture shows the installed 0.4.0 CLI processing constructed scanner reports.
+Five observations become three findings; the gate blocks on two active findings.
+A second scenario contains only the fixture covered by a valid exception and passes.
+The demonstration also checks that an expired waiver blocks.
+
+[Run the example](docs/demo.md) to inspect the JSON, SARIF, Markdown and remediation
+exports. No credential provider is contacted; the example does not revoke or rotate credentials.
+
 ## What it does
 
 | Capability | Result |
