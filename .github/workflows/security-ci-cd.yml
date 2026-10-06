@@ -299,6 +299,21 @@ jobs:
           else
             scanner_status=$?
           fi
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          report = json.loads((Path(os.environ["RUNNER_TEMP"]) / "trivy-secrets.json").read_text())
+          results = report.get("Results")
+          allowed_types = {"filesystem", "container_image", "repository"}
+          print(json.dumps({
+              "schema_version": report.get("SchemaVersion") if isinstance(report.get("SchemaVersion"), int) else None,
+              "artifact_type": report.get("ArtifactType") if report.get("ArtifactType") in allowed_types else "unrecognized",
+              "artifact_name_present": isinstance(report.get("ArtifactName"), str) and bool(report["ArtifactName"]),
+              "results_type": type(results).__name__,
+              "result_count": len(results) if isinstance(results, list) else None,
+          }))
+          PY
           python3 scripts/check_security_reports.py trivy-secrets "$RUNNER_TEMP/trivy-secrets.json" \
             --scanner-status "$scanner_status" --sanitized-output reports/trivy-secrets-summary.json
       - name: Preserve security evidence
