@@ -138,11 +138,11 @@ def check_scorecard(report: dict) -> int:
 def sanitize_trivy_secrets(report: dict, scanner_status: int) -> dict:
     if (
         report.get("SchemaVersion") != 2
-        or report.get("ArtifactType") != "filesystem"
+        or report.get("ArtifactType") not in {"filesystem", "repository"}
         or not isinstance(report.get("ArtifactName"), str)
         or not report["ArtifactName"]
     ):
-        raise ValueError("missing Trivy filesystem producer metadata")
+        raise ValueError("missing Trivy source scan producer metadata")
     results = report.get("Results")
     # Trivy's Report.Results has json:",omitempty"; a clean scan omits this field.
     if results is None:

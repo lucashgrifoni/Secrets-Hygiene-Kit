@@ -351,8 +351,11 @@ def test_secret_gate_console_has_only_a_fixed_verdict_and_artifact_retains_count
 
 
 @pytest.mark.parametrize("results", [None, []])
-def test_trivy_clean_report_may_omit_results_but_must_keep_producer_metadata(results):
-    report = {"SchemaVersion": 2, "ArtifactType": "filesystem", "ArtifactName": "."}
+@pytest.mark.parametrize("artifact_type", ["filesystem", "repository"])
+def test_trivy_clean_report_may_omit_results_but_must_keep_producer_metadata(
+    results, artifact_type
+):
+    report = {"SchemaVersion": 2, "ArtifactType": artifact_type, "ArtifactName": "."}
     if results is not None:
         report["Results"] = results
     assert sanitize_trivy_secrets(report, 0)["verdict"] == "PASS"
