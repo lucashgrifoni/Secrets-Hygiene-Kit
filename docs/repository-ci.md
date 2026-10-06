@@ -39,7 +39,10 @@ targets and required gates in the same PR.
   redacts values and Trivy publishes only counts and rule identifiers.
 - zizmor blocks medium and higher findings; actionlint blocks invalid workflows.
 - Scorecard requires 10/10 for Dangerous-Workflow, Token-Permissions,
-  Binary-Artifacts, Security-Policy and License. The full report also records
+  Binary-Artifacts and Security-Policy. License must score at least 9;
+  the contributor suite also checks the unchanged Apache-2.0 license text and
+  project declaration. Offline Scorecard analysis cannot verify the license's
+  OSI/FSF classification, so a 9 is not treated as an unknown project license. The full report also records
   other checks; passing this policy does not mean every Scorecard check is 10/10.
   Classic branch protection is verified through the repository API because
   Scorecard's limited token may not observe that configuration.

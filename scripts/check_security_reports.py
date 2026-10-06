@@ -10,7 +10,7 @@ from pathlib import Path
 SCORECARD_MINIMUMS = {
     "Binary-Artifacts": 10,
     "Dangerous-Workflow": 10,
-    "License": 10,
+    "License": 9,
     "Security-Policy": 10,
     "Token-Permissions": 10,
 }
@@ -35,8 +35,10 @@ def check_sarif(report: dict, expected_tool: str) -> int:
         driver = run["tool"]["driver"]
         if expected_tool.casefold() not in driver["name"].casefold():
             raise ValueError("unexpected SARIF producer")
-        rules = driver.get("rules", [])
-        if not isinstance(rules, list) or (expected_tool.casefold() == "codeql" and not rules):
+        extensions = run["tool"].get("extensions", [])
+        components = [driver, *extensions]
+        rules = [rule for component in components for rule in component.get("rules", [])]
+        if expected_tool.casefold() == "codeql" and not rules:
             raise ValueError("SARIF has no analyzed rules")
         if expected_tool.casefold() == "zizmor" and not any(
             invocation.get("executionSuccessful") is True
@@ -54,12 +56,25 @@ def check_sarif(report: dict, expected_tool: str) -> int:
             raise ValueError("SARIF results are missing")
         indexed = {rule["id"]: rule for rule in rules}
         for result in results:
-            rule = indexed.get(result.get("ruleId"))
-            if rule is None and "ruleIndex" in result:
-                index = result["ruleIndex"]
-                if not isinstance(index, int) or not 0 <= index < len(rules):
+            descriptor = result.get("rule", {})
+            rule = indexed.get(result.get("ruleId", descriptor.get("id")))
+            component_ref = descriptor.get("toolComponent", {})
+            if "index" in component_ref:
+                component_index = component_ref["index"]
+                if not isinstance(component_index, int) or not 0 <= component_index < len(
+                    extensions
+                ):
+                    raise ValueError("invalid SARIF tool component")
+                component_rules = extensions[component_index].get("rules", [])
+            else:
+                component_rules = driver.get("rules", [])
+            index = descriptor.get("index", result.get("ruleIndex"))
+            if index is not None:
+                if not isinstance(index, int) or not 0 <= index < len(component_rules):
                     raise ValueError("invalid SARIF rule index")
-                rule = rules[index]
+                rule = component_rules[index]
+                if rule["id"] != result.get("ruleId", descriptor.get("id", rule["id"])):
+                    raise ValueError("inconsistent SARIF rule reference")
             if rule is None and expected_tool.casefold() == "zizmor" and result.get("ruleId"):
                 rule = {"id": result["ruleId"]}
             if rule is None:
@@ -166,9 +181,11 @@ def main() -> int:
                 raise ValueError("scanner status and sanitized output are required")
             summary = sanitize_trivy_secrets(report, args.scanner_status)
             args.sanitized_output.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
-            count = summary["blocking_count"]
             if summary["verdict"] != "PASS":
                 raise ValueError("secret scan failed or reported blocking findings")
+            # Keep derived secret data out of the console; counts stay in the artifact.
+            print("trivy-secrets: PASS")
+            return 0
         print(f"{args.kind}: {'BLOCK' if count else 'PASS'}; blocking findings/checks: {count}")
         return 1 if count else 0
     except (OSError, ValueError, KeyError, TypeError, IndexError):

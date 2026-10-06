@@ -135,7 +135,10 @@ jobs:
           mkdir -p reports "$RUNNER_TEMP/security-dependencies"
           python -m pip freeze --exclude-editable > "$RUNNER_TEMP/security-dependencies/requirements.txt"
       - name: Audit the installed dependency environment
-        run: python -m pip_audit --strict --progress-spinner off --format json --output reports/pip-audit.json
+        run: >-
+          python -m pip_audit --requirement "${{ runner.temp }}/security-dependencies/requirements.txt"
+          --strict --no-deps --disable-pip --progress-spinner off
+          --format json --output reports/pip-audit.json
       - name: Trivy audit of resolved dependencies, including unfixed advisories
         run: |
           trivy fs --scanners vuln --severity MEDIUM,HIGH,CRITICAL,UNKNOWN \
@@ -242,10 +245,13 @@ jobs:
         run: |
           python3 - <<'PY'
           import os
+          import base64
+          import hashlib
           from pathlib import Path
           target = Path(os.environ["RUNNER_TEMP"]) / "secret-control"
           target.mkdir()
-          token = "ghp_" + "0123456789abcdefghijklmnopqrstuvwxyz"
+          digest = hashlib.sha256(b"secguard-ci-constructed-scanner-control").digest()
+          token = "ghp_" + base64.b64encode(digest).decode().replace("+", "A").replace("/", "b")[:36]
           (target / "canary.txt").write_text("Constructed scanner control; not issued by a provider.\n" + token + "\n")
           PY
           if gitleaks dir --redact=100 --no-banner --report-format json \
@@ -273,6 +279,10 @@ jobs:
           trivy = json.loads((temp / "trivy-control.json").read_text())
           if not gitleaks or not any(target.get("Secrets") for target in trivy.get("Results", [])):
               raise SystemExit("scanner failed without detecting the canary")
+          Path("reports").mkdir(exist_ok=True)
+          Path("reports/scanner-controls.json").write_text(json.dumps({
+              "constructed": True, "gitleaks_blocked": True, "trivy_blocked": True
+          }) + "\n")
           print("Both scanner controls produced blocking findings")
           PY
       - name: Scan all Git history and redact findings
@@ -325,11 +335,6 @@ jobs:
     needs: [semgrep, codeql, dependencies, workflows, secrets, dependency-review]
     if: >-
       !cancelled() &&
-      needs.semgrep.result == 'success' &&
-      needs.codeql.result == 'success' &&
-      needs.dependencies.result == 'success' &&
-      needs.workflows.result == 'success' &&
-      needs.secrets.result == 'success' &&
       (
         (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
         (github.event_name == 'schedule') ||

@@ -281,3 +281,54 @@ def test_fork_pr_runs_all_scanners_without_requiring_a_write_token(file, gate, t
         timeout=10,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_license_policy_checks_the_approved_apache_text_even_when_scorecard_is_offline():
+    import hashlib
+    import tomllib
+
+    text = (ROOT / "LICENSE").read_text(encoding="utf-8")
+    assert (
+        hashlib.sha256(text.encode()).hexdigest()
+        == "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    )
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert project["project"]["license"] == "Apache-2.0"
+
+
+def test_codeql_rule_descriptors_in_extensions_still_block_medium_findings():
+    report = sarif("4.0")
+    driver = report["runs"][0]["tool"]["driver"]
+    rules = driver.pop("rules")
+    report["runs"][0]["tool"]["extensions"] = [{"name": "codeql/python-queries", "rules": rules}]
+    report["runs"][0]["results"] = [
+        {
+            "ruleId": "py/security-test",
+            "rule": {"id": "py/security-test", "index": 0, "toolComponent": {"index": 0}},
+        }
+    ]
+    assert check_sarif(report, "CodeQL") == 1
+
+
+def test_secret_gate_console_has_only_a_fixed_verdict_and_artifact_retains_counts(tmp_path):
+    report = tmp_path / "secret-report.json"
+    output = tmp_path / "counts.json"
+    report.write_text(json.dumps({"Results": []}), encoding="utf-8")
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/check_security_reports.py"),
+            "trivy-secrets",
+            str(report),
+            "--scanner-status",
+            "0",
+            "--sanitized-output",
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0
+    assert result.stdout.strip() == "trivy-secrets: PASS"
+    assert json.loads(output.read_text())["finding_count"] == 0
