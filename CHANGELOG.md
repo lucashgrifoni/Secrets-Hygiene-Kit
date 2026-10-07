@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.5.0] - 2026-10-07
+
+- Accept repeated `--input` in `scan normalize`, sharing classification and
+  coalescing with `check` and `report` without evaluating waivers.
+- Reject output collisions with inputs, selected policies and other exports
+  before the first write, including aliases and existing hardlinks. Reject
+  linked destinations and invalid file/directory layouts in the same preflight.
+- Label console and Markdown verification as imported from the detector report.
+  Preserve JSON verification values, SARIF, severity escalation and gate exits.
+- Accept canonical `secguard.findings/v1` input with strict schema validation,
+  recomputed classification/IDs and a conservative severity floor.
+- Add an explicit Betterleaks 1.x JSON adapter and a corpus captured with 1.9.0.
+- Export reconciled OPA input and package a Rego v1 policy; validate actual OPA
+  allow, deny, expired-waiver, invalid-input and undefined-query behavior.
+- Export active findings for DefectDojo Generic Findings Import, with stable
+  identifiers and `verified=false`. Document matching and severity-review settings.
+- Extend CLI/distribution CI to macOS and run composite Action cases on Windows.
+
+### Migrating to 0.5.0
+
+An explicit `--waivers FILE` now requires an existing file, even with
+`--fail-on none`. Omit the flag to use an optional `.secguard/waivers.yaml` default.
+The composite Action's empty `waivers` input uses that default; nonempty paths
+are required. Pipelines that previously selected an absent policy must either
+provide the reviewed file or deliberately use the optional default.
+
+Choose distinct destinations for every export; in-place transformation of inputs
+or policies is refused with exit `2`. Console labels change from `verified=live`
+to `verified=detector:true`, `verified=detector:false` or `verified=not-reported`.
+Use JSON for machine parsing. The preflight is not an atomic transaction and
+does not prevent concurrent filesystem changes or later I/O failures.
+The 0.4.0 release artifacts remain unchanged. New integrations exchange files;
+the core does not run OPA, scanners or a DefectDojo server.
+
 ## [0.4.0] - 2026-10-05
 
 ### PR summaries

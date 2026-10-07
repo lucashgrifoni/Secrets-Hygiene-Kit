@@ -1,0 +1,72 @@
+{
+  "archive_sha256": "b765daec9fda475b031b5a5159798cbe4294a3f2a50683cbc0471226e376d3da",
+  "binary_sha256": "41a3dc5e75712d52d25aa7203b0b6bc2fa9c796fe5109d3835c60226a9a69352",
+  "captured_at": "2026-10-07T13:33:17.777040+00:00",
+  "cases": {
+    "clean": {
+      "argv": [
+        "betterleaks",
+        "dir",
+        "sample.env",
+        "--report-format",
+        "json",
+        "--report-path",
+        "raw.json",
+        "--exit-code",
+        "0",
+        "--no-banner",
+        "--no-color",
+        "--redact=100",
+        "--timeout",
+        "30"
+      ],
+      "exit_code": 0,
+      "finding_count": 0,
+      "fixture_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "input_sha256": "8893a1472e177dcbf1c1d4462a24d4b4e92f801d59c5b0eaa63fef893362ed8e",
+      "kind": "captured-producer-output-with-redaction-canaries",
+      "observed_rules": [],
+      "raw_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "validation_enabled": false
+    },
+    "malformed": {
+      "fixture_sha256": "4f5af7ab65f5a9454655f707b049eb0c3dff5c025535da7aa489c61b2fb37168",
+      "kind": "derived-invalid-input-not-emitted-by-producer"
+    },
+    "positive": {
+      "argv": [
+        "betterleaks",
+        "dir",
+        "sample.env",
+        "--report-format",
+        "json",
+        "--report-path",
+        "raw.json",
+        "--exit-code",
+        "0",
+        "--no-banner",
+        "--no-color",
+        "--redact=100",
+        "--timeout",
+        "30"
+      ],
+      "exit_code": 0,
+      "finding_count": 2,
+      "fixture_sha256": "7a166481abc0b5fb866cd0d9c46bbbac564fdffe6d0d26fdb196bb176427ef04",
+      "input_sha256": "ca7f0813474e16ff3c276bb4788a9db5a295fc07e265a614792f0336508199dd",
+      "kind": "captured-producer-output-with-redaction-canaries",
+      "observed_rules": [
+        "aws-access-token",
+        "github-pat"
+      ],
+      "raw_sha256": "8413c4e4cdcee669ab9aa7da63069de24abd42de28be6dacacb6b1d7d2aa905f",
+      "validation_enabled": false
+    }
+  },
+  "platform": "windows/amd64",
+  "schema": "secguard.betterleaks-fixtures/v1",
+  "scope": "Local synthetic file only; default rule pack; no provider verification",
+  "script_sha256": "6a32f6767c416340179fbcef808a3a3af0c72fed46e363b5b1266fdb0531b58e",
+  "source": "https://github.com/betterleaks/betterleaks/releases/tag/v1.9.0",
+  "version": "1.9.0"
+}

@@ -11,7 +11,7 @@
 .secguard_base:
   image: python:3.12
   before_script:
-    - python -m pip install --no-cache-dir "git+https://github.com/lucashgrifoni/secrets-hygiene-kit@v0.4.0"
+    - python -m pip install --no-cache-dir "git+https://github.com/lucashgrifoni/secrets-hygiene-kit@v0.5.0"
 
 secguard:waivers:
   extends: .secguard_base

@@ -463,10 +463,10 @@ def test_scan_check_reports_the_playbook_for_each_finding():
     assert "playbook=postgres-uri" in result.output
 
 
-def test_scan_check_marks_a_live_credential():
+def test_scan_check_marks_detector_reported_verification():
     result = runner.invoke(app, _scan_arguments("--fail-on", "none"))
 
-    assert "verified=live" in result.output
+    assert "verified=detector:true" in result.output
 
 
 def test_scan_check_writes_every_requested_artifact(tmp_path):
@@ -577,6 +577,9 @@ def test_scan_check_treats_an_empty_report_as_a_clean_scan(tmp_path):
     empty.write_text("", encoding="utf-8")
     clean_gitleaks = tmp_path / "gitleaks.json"
     clean_gitleaks.write_text("[]", encoding="utf-8")
+    (tmp_path / "empty-waivers.yaml").write_text(
+        'schema: "secguard.waiver/v1"\nwaivers: []\n', encoding="utf-8"
+    )
 
     result = runner.invoke(
         app,
@@ -584,7 +587,7 @@ def test_scan_check_treats_an_empty_report_as_a_clean_scan(tmp_path):
             "--fail-on",
             "high",
             "--waivers",
-            str(tmp_path / "absent.yaml"),
+            str(tmp_path / "empty-waivers.yaml"),
             reports=[clean_gitleaks, empty],
         ),
     )
@@ -646,13 +649,13 @@ def test_scan_check_rejects_an_unknown_threshold():
     assert result.exit_code == 2
 
 
-def test_scan_check_notes_a_missing_waiver_file_without_failing(tmp_path):
+def test_scan_check_rejects_explicit_missing_waivers_even_in_report_only_mode(tmp_path):
     result = runner.invoke(
         app, _scan_arguments("--fail-on", "none", "--waivers", str(tmp_path / "absent.yaml"))
     )
 
-    assert result.exit_code == 0
-    assert "continuing with zero waivers" in result.output
+    assert result.exit_code == 2
+    assert "waiver file not found" in result.output
 
 
 def test_scan_check_applies_a_local_rule_override(tmp_path):

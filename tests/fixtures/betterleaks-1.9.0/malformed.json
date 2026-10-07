@@ -1,0 +1,7 @@
+[
+  {
+    "File": "../outside.py",
+    "RuleID": "github-pat",
+    "Secret": "SECGUARD-BETTERLEAKS-CANARY-malformed"
+  }
+]

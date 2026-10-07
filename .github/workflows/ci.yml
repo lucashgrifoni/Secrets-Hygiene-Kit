@@ -93,7 +93,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.12", "3.13", "3.14"]
     steps:
       - name: Checkout
@@ -232,7 +232,10 @@ jobs:
 
   action:
     name: Composite Action / ${{ matrix.case }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os || 'ubuntu-latest' }}
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -294,6 +297,67 @@ jobs:
             verdict: NO-REPORTS
             count: "0"
             outputs: "false"
+          - case: default-waiver-absent
+            report: ci-action/clean.json
+            waivers: ""
+            allow-missing: "false"
+            outcome: success
+            verdict: PASS
+            count: "1"
+            outputs: "true"
+          - case: explicit-waiver-absent
+            report: ci-action/clean.json
+            waivers: ci-action/absent.yaml
+            allow-missing: "false"
+            outcome: failure
+            verdict: ERROR
+            count: ""
+            outputs: "false"
+          - case: windows-pass
+            os: windows-latest
+            report: ci-action/clean.json
+            waivers: ci-action/waivers.yaml
+            allow-missing: "false"
+            outcome: success
+            verdict: PASS
+            count: "1"
+            outputs: "true"
+          - case: windows-block
+            os: windows-latest
+            report: ci-action/leaked.json
+            waivers: ci-action/waivers.yaml
+            allow-missing: "false"
+            outcome: failure
+            verdict: BLOCK
+            count: "1"
+            outputs: "true"
+          - case: windows-default-waiver-absent
+            os: windows-latest
+            report: ci-action/clean.json
+            waivers: ""
+            allow-missing: "false"
+            outcome: success
+            verdict: PASS
+            count: "1"
+            outputs: "true"
+          - case: windows-explicit-waiver-absent
+            os: windows-latest
+            report: ci-action/clean.json
+            waivers: ci-action/absent.yaml
+            allow-missing: "false"
+            outcome: failure
+            verdict: ERROR
+            count: ""
+            outputs: "false"
+          - case: windows-path-with-spaces
+            os: windows-latest
+            report: ci-action/scan results/clean.json
+            waivers: ci-action/waivers.yaml
+            allow-missing: "false"
+            outcome: success
+            verdict: PASS
+            count: "1"
+            outputs: "true"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -302,7 +366,7 @@ jobs:
 
       - name: Prepare Action cases
         run: |
-          python3 - <<'PY'
+          python - <<'PY'
           import shutil
           from pathlib import Path
 
@@ -339,7 +403,7 @@ jobs:
           ACTUAL_VERDICT: ${{ steps.gate.outputs.verdict }}
           ACTUAL_COUNT: ${{ steps.gate.outputs.reports-found }}
         run: |
-          python3 - <<'PY'
+          python - <<'PY'
           import os
           from pathlib import Path
 
@@ -483,10 +547,43 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  opa:
+    name: OPA policy contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install secguard and a checksum-verified OPA
+        run: |
+          python -m pip install --disable-pip-version-check .
+          curl --fail --location --retry 3 --output opa https://github.com/open-policy-agent/opa/releases/download/v1.21.1/opa_linux_amd64_static
+          echo '668506eb17a2eaa1fce6cc0d1f42ef85125d4ac5bda5fc74d1152d0c77145031  opa' | sha256sum --check --strict
+          chmod +x opa
+
+      - name: Exercise actual policy allow, deny, invalid and undefined decisions
+        run: python scripts/validate_opa.py --opa ./opa --result opa-validation.json
+
+      - name: Preserve policy evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: opa-validation
+          path: opa-validation.json
+          if-no-files-found: error
+          retention-days: 7
+
   release-checks:
     name: Release checks
     if: always()
-    needs: [build, test, security, self-check, action, pr-comment, provenance]
+    needs: [build, test, security, self-check, action, pr-comment, provenance, opa]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -504,7 +601,7 @@ jobs:
           import os
 
           results = json.loads(os.environ["RESULTS"])
-          for job in ("build", "test", "security", "self-check", "action"):
+          for job in ("build", "test", "security", "self-check", "action", "opa"):
               if results[job]["result"] != "success":
                   raise SystemExit(f"{job} did not pass: {results[job]['result']}")
           trusted_push = os.environ["EVENT_NAME"] == "push" and os.environ["REF"] == "refs/heads/main"

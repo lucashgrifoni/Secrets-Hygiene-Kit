@@ -30,9 +30,9 @@ inputs:
     required: false
     default: "false"
   waivers:
-    description: "Path to the secguard waiver file."
+    description: "Explicit waiver file must exist. Empty uses the optional .secguard/waivers.yaml default."
     required: false
-    default: ".secguard/waivers.yaml"
+    default: ""
   fail-on:
     description: "Blocking severity threshold: none, info, low, medium, high, critical."
     required: false
@@ -117,10 +117,11 @@ runs:
       env:
         SECGUARD_WAIVERS: ${{ inputs.waivers }}
       run: |
-        if [ -f "$SECGUARD_WAIVERS" ]; then
-          secguard waivers check --file "$SECGUARD_WAIVERS"
+        selected="${SECGUARD_WAIVERS:-.secguard/waivers.yaml}"
+        if [ -n "$SECGUARD_WAIVERS" ] || [ -f "$selected" ]; then
+          secguard waivers check --file "$selected"
         else
-          echo "no waiver file at $SECGUARD_WAIVERS; skipping the lifecycle check"
+          echo "no default waiver file at $selected; skipping the lifecycle check"
         fi
 
     - name: Check playbook freshness
@@ -172,12 +173,12 @@ runs:
         done < "$RUNNER_TEMP/secguard-reports.txt"
 
         if [ -n "$SECGUARD_RULES" ]; then args+=(--rules "$SECGUARD_RULES"); fi
+        if [ -n "$SECGUARD_WAIVERS" ]; then args+=(--waivers "$SECGUARD_WAIVERS"); fi
         if [ -n "$SECGUARD_SARIF" ]; then args+=(--sarif "$SECGUARD_SARIF"); fi
         if [ -n "$SECGUARD_MARKDOWN" ]; then args+=(--markdown "$SECGUARD_MARKDOWN"); fi
         if [ -n "$SECGUARD_COMMENT" ]; then args+=(--pr-comment "$SECGUARD_COMMENT"); fi
 
         if secguard scan check "${args[@]}" \
-          --waivers "$SECGUARD_WAIVERS" \
           --fail-on "$SECGUARD_FAIL_ON"; then
           echo "verdict=PASS" >> "$GITHUB_OUTPUT"
         else

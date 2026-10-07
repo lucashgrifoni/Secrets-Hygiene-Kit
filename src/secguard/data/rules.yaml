@@ -71,7 +71,7 @@ secret_types:
 
 detectors:
   # gitleaks rule IDs from the default rule pack.
-  gitleaks:
+  gitleaks: &gitleaks_rules
     aws-access-token: aws-access-key
     github-pat: github-pat
     github-fine-grained-pat: github-pat
@@ -94,6 +94,9 @@ detectors:
     generic-api-key:
       secret_type: generic-api-key
       severity: low
+
+  # Betterleaks 1.x retains these identifiers; distinct scanner/waiver scope.
+  betterleaks: *gitleaks_rules
 
   # trufflehog DetectorName values.
   trufflehog:

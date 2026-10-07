@@ -55,7 +55,15 @@ def parse_report(text: str, *, source: str, catalog: RuleCatalog) -> FindingDocu
     return FindingDocument(findings=findings)
 
 
-def _build(entry: dict[str, Any], source: str, index: int, catalog: RuleCatalog) -> Finding:
+def _build(
+    entry: dict[str, Any],
+    source: str,
+    index: int,
+    catalog: RuleCatalog,
+    *,
+    scanner: str = SCANNER_NAME,
+    verified: bool | None = None,
+) -> Finding:
     rule_id = require_text(
         pick(entry, "RuleID", "ruleID", "rule_id"),
         source=source,
@@ -70,28 +78,29 @@ def _build(entry: dict[str, Any], source: str, index: int, catalog: RuleCatalog)
     description = pick(entry, "Description", "description")
 
     return build_finding(
-        scanner=SCANNER_NAME,
+        scanner=scanner,
         rule_id=rule_id,
         path=path,
         message=(
             sanitize_text(description)
             if isinstance(description, str) and description.strip()
-            else f"gitleaks rule {rule_id} matched"
+            else f"{scanner} rule {rule_id} matched"
         ),
         catalog=catalog,
         line=positive_int(pick(entry, "StartLine", "startLine")),
         column=positive_int(pick(entry, "StartColumn", "startColumn")),
-        fingerprint=_fingerprint(entry),
+        fingerprint=_fingerprint(entry, scanner=scanner),
         commit=sanitize_commit(pick(entry, "Commit", "commit")),
+        verified=verified,
     )
 
 
-def _fingerprint(entry: dict[str, Any]) -> str | None:
+def _fingerprint(entry: dict[str, Any], *, scanner: str = SCANNER_NAME) -> str | None:
     """Use the gitleaks fingerprint, which encodes path, rule, and line only."""
     value = pick(entry, "Fingerprint", "fingerprint")
     if not isinstance(value, str) or not value.strip():
         return None
     safe = sanitize_text(value, max_length=max(160, len(value)))
     if len(safe) > 160:
-        return f"gitleaks:sha256:{hashlib.sha256(safe.encode('utf-8')).hexdigest()}"
-    return f"gitleaks:{safe}"
+        return f"{scanner}:sha256:{hashlib.sha256(safe.encode('utf-8')).hexdigest()}"
+    return f"{scanner}:{safe}"

@@ -109,9 +109,9 @@ directions:
 | `medium` | scoped or single-purpose access (Slack webhook, unclassified API key) |
 | `low` | heuristic matches with a high false-positive rate (entropy detectors) |
 
-A detector that verified the credential is live overrides all of this and
-escalates to `critical`, because verification removes the exploitability doubt
-that severity estimates exist to model.
+A detector report with a true verification result overrides these defaults
+and escalates to `critical`. secguard prioritizes that imported claim; it does
+not establish current validity, permissions or exploitability at the provider.
 
 ## 7. Verify
 
