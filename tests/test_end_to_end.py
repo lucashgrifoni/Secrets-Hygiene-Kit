@@ -27,7 +27,7 @@ CLEAN_GITLEAKS = "[]"
 CLEAN_DETECT_SECRETS = '{"version": "1.5.0", "results": {}}'
 
 # One leak, reported by two detectors at the same location. trufflehog proves it
-# is live, which is what makes the waiver-scope rules matter.
+# was verified in the imported report, which makes the waiver-scope rules matter.
 LEAKED_GITLEAKS = json.dumps(
     [
         {
@@ -231,7 +231,7 @@ def test_a_live_credential_blocks_the_build_and_no_output_carries_it(project, se
     assert result.returncode == 1, result.stderr
     assert "BLOCK" in result.stdout
     assert "critical" in result.stdout
-    assert "verified=live" in result.stdout
+    assert "verified=detector:true" in result.stdout
     assert "also=trufflehog:AWS" in result.stdout
 
     artifacts = ["out.json", "out.sarif", "out.md", "pr.md"]
@@ -276,11 +276,15 @@ def test_the_full_waiver_lifecycle_through_the_public_interface(project, secguar
         "w.yaml",
     ]
 
+    missing = run([*gate, "--today", "2026-08-05"], project, secguard_environment)
+    assert missing.returncode == 2
+    assert "waiver file not found" in missing.stderr
+    (project / "w.yaml").write_text('schema: "secguard.waiver/v1"\nwaivers: []\n', encoding="utf-8")
     blocked = run([*gate, "--today", "2026-08-05"], project, secguard_environment)
     assert blocked.returncode == 1
 
     # A waiver written against one detector's match must not carry the merged
-    # finding — the other detector proved the credential is live.
+    # finding — the other detector reported credential verification.
     narrow = run(
         [
             "waivers",

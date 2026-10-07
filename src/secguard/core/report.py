@@ -33,6 +33,9 @@ def render_report(outcome: ScanOutcome, *, generated_on: date, version: str) -> 
         "It normalizes detector reports, applies the waiver lifecycle, and points at the "
         "response playbook a human should follow.",
         "",
+        "Verification values are imported from the detector report; secguard does not contact "
+        "the provider. A false or missing value does not establish that a credential is invalid.",
+        "",
     ]
 
     lines.extend(_severity_table(outcome))
@@ -159,7 +162,7 @@ def _findings_table(title: str, results: list[ReconciledFinding]) -> list[str]:
     lines = [
         f"## {title} ({len(results)})",
         "",
-        "| Severity | Secret type | Location | Scanner | Verified | Playbook |",
+        "| Severity | Secret type | Location | Scanner | Verified (detector report) | Playbook |",
         "| --- | --- | --- | --- | --- | --- |",
         *rows,
     ]
@@ -276,7 +279,7 @@ def _scanners(result: ReconciledFinding) -> str:
 
 def _verified_label(result: ReconciledFinding) -> str:
     if result.finding.verified is True:
-        return "**live**"
+        return "**reported true**"
     if result.finding.verified is False:
-        return "no"
-    return "unknown"
+        return "reported false"
+    return "not reported"

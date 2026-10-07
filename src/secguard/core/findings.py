@@ -272,8 +272,8 @@ def build_finding(
     )
     resolved_severity = severity or classification.severity
 
-    # A detector that proved the credential is live removes all doubt about
-    # exploitability, so it outranks any catalog default.
+    # Prioritize the detector's reported verification above catalog defaults.
+    # This imported claim does not establish current validity or exploitability.
     if verified:
         resolved_severity = max_severity(resolved_severity, "critical")
 

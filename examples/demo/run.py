@@ -49,7 +49,7 @@ def main() -> None:
     parser.add_argument("--secguard", default=shutil.which("secguard"))
     parser.add_argument("--output-dir", type=Path, help="A new or empty directory for the demo.")
     args = parser.parse_args()
-    require(bool(args.secguard), "Install secguard 0.4.0 and activate its environment first.")
+    require(bool(args.secguard), "Install secguard 0.5.0 and activate its environment first.")
     cli = str(Path(args.secguard).resolve())
     work = args.output_dir or Path(tempfile.mkdtemp(prefix="secguard-demo-"))
     work = work.resolve()
@@ -84,9 +84,7 @@ def main() -> None:
         print(f"Observed exit: {result.returncode}")
         return result.stdout
 
-    require(
-        execute("version", ["version"], 0).strip() == "0.4.0", "Use the published 0.4.0 release."
-    )
+    require(execute("version", ["version"], 0).strip() == "0.5.0", "Use the 0.5.0 release.")
     fixture = gitleaks("aws-access-token", "tests/fixtures/fake_aws.txt", 4)
     before = [
         gitleaks("aws-access-token", "app/config.py", 12),
@@ -196,7 +194,7 @@ def main() -> None:
         )
     receipt = {
         "status": "PASS",
-        "secguard_version": "0.4.0",
+        "secguard_version": "0.5.0",
         "fixed_date": TODAY,
         "runs": runs,
         "scope": "Constructed reports; actual CLI; no scanner or provider operation.",

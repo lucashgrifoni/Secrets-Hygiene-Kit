@@ -7,9 +7,9 @@ trufflehog carries the credential in ``Raw``, ``RawV2``, ``Redacted``, and
 sometimes inside ``ExtraData``; the git source metadata also carries the commit
 author's email address. None of those keys are read here.
 
-trufflehog is the only supported detector that verifies credentials against the
-provider. A ``Verified: true`` result means the credential was live at scan
-time, so secguard escalates it to critical severity.
+trufflehog can verify credentials against the provider. An imported
+``Verified: true`` result reports verification at the detector's scan time,
+so secguard escalates it to critical severity without contacting the provider.
 """
 
 from __future__ import annotations

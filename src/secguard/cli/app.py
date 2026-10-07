@@ -14,6 +14,7 @@ import json
 import os
 import sys
 from datetime import UTC, date, datetime
+from importlib import resources
 from pathlib import Path
 from typing import Annotated
 
@@ -38,6 +39,7 @@ from secguard.core.playbooks import (
     load_playbook,
     stale_playbooks,
 )
+from secguard.core.policy_consumers import build_defectdojo_report, build_opa_input
 from secguard.core.reconcile import EXIT_GATE_FAILED, FAIL_ON_CHOICES, ScanOutcome, reconcile
 from secguard.core.redaction import sanitize_text
 from secguard.core.remediation import build_remediation_document, serialize_remediation_document
@@ -50,7 +52,7 @@ from secguard.core.waivers import (
     load_waiver_file,
     load_waiver_file_or_empty,
 )
-from secguard.core.writing import UnsafeWriteError, assert_writable
+from secguard.core.writing import UnsafeWriteError, assert_output_paths, assert_writable
 
 DEFAULT_WAIVER_FILE = Path(".secguard/waivers.yaml")
 EXIT_INPUT_ERROR = 2
@@ -82,11 +84,13 @@ waivers_app = typer.Typer(
 scan_app = typer.Typer(help="Normalize and gate scanner reports.", no_args_is_help=True)
 playbooks_app = typer.Typer(help="Inspect packaged remediation playbooks.", no_args_is_help=True)
 incident_app = typer.Typer(help="Start a guided leak response.", no_args_is_help=True)
+policy_app = typer.Typer(help="Inspect the packaged OPA example policy.", no_args_is_help=True)
 
 app.add_typer(waivers_app, name="waivers")
 app.add_typer(scan_app, name="scan")
 app.add_typer(playbooks_app, name="playbooks")
 app.add_typer(incident_app, name="incident")
+app.add_typer(policy_app, name="policy")
 
 
 def main() -> None:
@@ -333,6 +337,16 @@ def _load_findings(
         raise _fail(f"cannot access scanner report: {exc.strerror or 'filesystem error'}") from exc
 
 
+def _preflight_outputs(outputs: list[Path | None], protected: list[Path]) -> None:
+    """Reject predictable conflicts before changing any requested output."""
+    try:
+        assert_output_paths([path for path in outputs if path is not None], protected)
+    except UnsafeWriteError as exc:
+        raise _fail(str(exc)) from exc
+    except OSError as exc:
+        raise _fail(f"cannot validate output paths: {exc.strerror or 'filesystem error'}") from exc
+
+
 def _write_output(path: Path, content: str) -> None:
     try:
         assert_writable(path)
@@ -418,9 +432,11 @@ def render_report_command(
         typer.Option("--format", help="Report format, or `auto` to infer it from structure."),
     ] = "auto",
     waiver_file: Annotated[
-        Path,
-        typer.Option("--waivers", help="Waiver file used to mark findings as accepted."),
-    ] = DEFAULT_WAIVER_FILE,
+        Path | None,
+        typer.Option(
+            "--waivers", help="Required when selected. Default .secguard/waivers.yaml is optional."
+        ),
+    ] = None,
     output: Annotated[
         Path | None,
         typer.Option("--output", "-o", help="Write Markdown here instead of stdout."),
@@ -436,12 +452,14 @@ def render_report_command(
 ) -> None:
     """Render a Markdown scan report without failing the build."""
     resolved_inputs = _require_inputs(inputs)
+    resolved_waivers = waiver_file if waiver_file is not None else DEFAULT_WAIVER_FILE
+    _preflight_outputs([output], [*resolved_inputs, resolved_waivers, *([rules] if rules else [])])
     catalog = _load_catalog(rules)
     check_date = _parse_today(today)
 
     outcome = reconcile(
         _load_findings(resolved_inputs, report_format, catalog),
-        _load_waivers(waiver_file, required=False),
+        _load_waivers(resolved_waivers, required=waiver_file is not None),
         today=check_date,
         fail_on="none",
     )
@@ -467,9 +485,11 @@ def scan_check(
         typer.Option("--format", help="Report format, or `auto` to infer it from structure."),
     ] = "auto",
     waiver_file: Annotated[
-        Path,
-        typer.Option("--waivers", help="Waiver file applied to the findings."),
-    ] = DEFAULT_WAIVER_FILE,
+        Path | None,
+        typer.Option(
+            "--waivers", help="Required when selected. Default .secguard/waivers.yaml is optional."
+        ),
+    ] = None,
     fail_on: Annotated[
         str,
         typer.Option("--fail-on", help=FAIL_ON_HELP),
@@ -494,6 +514,16 @@ def scan_check(
         Path | None,
         typer.Option("--remediation", help="Write an active-only remediation exchange here."),
     ] = None,
+    opa_output: Annotated[
+        Path | None,
+        typer.Option("--opa-input", help="Write a versioned reconciled snapshot for OPA."),
+    ] = None,
+    defectdojo_output: Annotated[
+        Path | None,
+        typer.Option(
+            "--defectdojo", help="Write active findings as DefectDojo Generic Findings Import."
+        ),
+    ] = None,
     repository: Annotated[
         str | None,
         typer.Option("--repository", help="Owner/name for --remediation; explicitly required."),
@@ -514,12 +544,25 @@ def scan_check(
         raise typer.BadParameter("--remediation and --repository must be provided together")
 
     resolved_inputs = _require_inputs(inputs)
+    resolved_waivers = waiver_file if waiver_file is not None else DEFAULT_WAIVER_FILE
+    _preflight_outputs(
+        [
+            json_output,
+            sarif_output,
+            markdown_output,
+            comment_output,
+            remediation_output,
+            opa_output,
+            defectdojo_output,
+        ],
+        [*resolved_inputs, resolved_waivers, *([rules] if rules else [])],
+    )
     catalog = _load_catalog(rules)
     check_date = _parse_today(today)
 
     outcome = reconcile(
         _load_findings(resolved_inputs, report_format, catalog),
-        _load_waivers(waiver_file, required=False),
+        _load_waivers(resolved_waivers, required=waiver_file is not None),
         today=check_date,
         fail_on=fail_on,
     )
@@ -533,6 +576,18 @@ def scan_check(
             remediation_content = serialize_remediation_document(remediation_document)
         except FindingError as exc:
             raise _fail(str(exc)) from exc
+
+    try:
+        opa_content = (
+            _dump_json(build_opa_input(outcome, version=__version__)) if opa_output else None
+        )
+        dojo_content = (
+            _dump_json(build_defectdojo_report(outcome, version=__version__))
+            if defectdojo_output
+            else None
+        )
+    except FindingError as exc:
+        raise _fail(str(exc)) from exc
 
     if json_output is not None:
         _write_output(
@@ -556,11 +611,32 @@ def scan_check(
         )
     if remediation_output is not None and remediation_content is not None:
         _write_output(remediation_output, remediation_content)
+    if opa_output is not None and opa_content is not None:
+        _write_output(opa_output, opa_content)
+    if defectdojo_output is not None and dojo_content is not None:
+        _write_output(defectdojo_output, dojo_content)
 
     _print_scan_summary(outcome, check_date)
 
     if outcome.failed:
         raise typer.Exit(code=EXIT_GATE_FAILED)
+
+
+@policy_app.command("show")
+def show_example_policy(
+    output: Annotated[
+        Path | None, typer.Option("--output", "-o", help="Write the Rego example here.")
+    ] = None,
+) -> None:
+    """Print an offline Rego v1 example that can only strengthen the secguard gate."""
+    _preflight_outputs([output], [])
+    policy = (
+        resources.files("secguard").joinpath("templates/secguard.rego").read_text(encoding="utf-8")
+    )
+    if output is None:
+        typer.echo(policy, nl=False)
+    else:
+        _write_output(output, policy)
 
 
 def _print_scan_summary(outcome: ScanOutcome, check_date: date) -> None:
@@ -574,7 +650,11 @@ def _print_scan_summary(outcome: ScanOutcome, check_date: date) -> None:
         finding = result.finding
         location = f"{finding.path}:{finding.line}" if finding.line else finding.path
         suffix = f" expired-waiver={result.expired_waiver_id}" if result.expired_waiver_id else ""
-        verified = " verified=live" if finding.verified else ""
+        verified = (
+            f" verified=detector:{str(finding.verified).lower()}"
+            if finding.verified is not None
+            else " verified=not-reported"
+        )
         # A merged finding shows every rule that contributed, because a waiver
         # has to cover all of them before it suppresses anything.
         also = (
@@ -621,10 +701,10 @@ def _print_scan_summary(outcome: ScanOutcome, check_date: date) -> None:
 
 @scan_app.command("normalize")
 def normalize_scan(
-    input_file: Annotated[
-        Path,
-        typer.Option("--input", "-i", help="Path to a scanner findings file."),
-    ],
+    inputs: Annotated[
+        list[Path] | None,
+        typer.Option("--input", "-i", help="Scanner report file. Repeat to merge reports."),
+    ] = None,
     report_format: Annotated[
         str,
         typer.Option("--format", help="Report format, or `auto` to infer it from structure."),
@@ -638,9 +718,11 @@ def normalize_scan(
         typer.Option("--rules", help=RULES_HELP),
     ] = None,
 ) -> None:
-    """Normalize one scanner report into the canonical secguard finding schema."""
+    """Normalize and combine scanner reports without evaluating waivers."""
+    resolved_inputs = _require_inputs(inputs)
+    _preflight_outputs([output], [*resolved_inputs, *([rules] if rules else [])])
     catalog = _load_catalog(rules)
-    document = _load_findings([input_file], report_format, catalog)
+    document = _load_findings(resolved_inputs, report_format, catalog)
     payload = _dump_json(document.model_dump(mode="json", by_alias=True))
 
     if output is None:

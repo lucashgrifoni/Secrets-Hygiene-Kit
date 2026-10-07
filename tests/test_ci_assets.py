@@ -361,14 +361,17 @@ def test_the_no_report_step_fails_by_default_and_passes_only_when_told(action, w
 def test_an_input_value_reaches_the_shell_as_data_not_as_a_command(action, workspace):
     """Interpolating an input into a `run:` body hands the runner a command."""
     payload = '.secguard/waivers.yaml"; touch PWNED; echo "'
+    step = _step(action, name="Check waiver lifecycle")
+    # Model the CLI input error while recording the arguments the shell sends.
+    step = {**step, "run": 'secguard() { printf "%s\\n" "$@"; return 2; }\n' + step["run"]}
 
     result = _run_step(
-        _step(action, name="Check waiver lifecycle"),
+        step,
         workspace,
         {**_runner_environment(workspace), "SECGUARD_WAIVERS": payload},
     )
 
-    assert result.returncode == 0
+    assert result.returncode == 2
     assert not (workspace / "PWNED").exists()
     assert payload in result.stdout  # echoed as text, executed as nothing
 
@@ -420,6 +423,7 @@ def test_a_pre_gate_failure_cannot_claim_that_no_reports_were_found(action):
         ("pull_request", "skipped", "build", 1),
         ("pull_request", "skipped", "security", 1),
         ("pull_request", "skipped", "self-check", 1),
+        ("pull_request", "skipped", "opa", 1),
         ("pull_request", "skipped", "pr-comment", 1),
     ],
 )

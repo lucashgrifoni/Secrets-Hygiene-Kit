@@ -70,11 +70,11 @@ def test_report_lists_playbooks_and_the_response_order(catalog):
     assert "secguard playbooks show aws-access-key" in markdown
 
 
-def test_report_shows_corroborating_scanners_and_live_verification(catalog):
+def test_report_shows_corroborating_scanners_and_detector_verification(catalog):
     markdown = render_report(_outcome(catalog), generated_on=TODAY, version=__version__)
 
     assert "gitleaks+detect-secrets+trufflehog" in markdown
-    assert "**live**" in markdown
+    assert "**reported true**" in markdown
 
 
 def test_report_separates_waived_findings_and_names_the_waiver(catalog):

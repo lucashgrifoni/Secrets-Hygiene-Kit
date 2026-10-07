@@ -21,4 +21,5 @@ nav:
   - Detector compatibility: detector-compatibility.md
   - PR comments: pr-comments.md
   - Remediation Hub: remediation-hub.md
+  - OPA and DefectDojo: integrations.md
   - Repository CI: repository-ci.md

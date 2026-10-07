@@ -9,7 +9,7 @@ checks without path filters.
 
 | Supplied template | Repository configuration | Adaptation |
 | --- | --- | --- |
-| `github-ci-cd.yml` | `.github/workflows/ci.yml` | Explicit Ruff, pytest, distribution, Action and installation checks replace npm commands. Linux/Windows and Python 3.12/3.13/3.14 remain covered. |
+| `github-ci-cd.yml` | `.github/workflows/ci.yml` | Ruff, pytest, distribution, Action and installation checks cover Linux/Windows/macOS with Python 3.12/3.13/3.14. The Action also runs on Windows; an actual OPA job checks the packaged policy. |
 | `security-ci-cd.yml` | `.github/workflows/security-ci-cd.yml` | Semgrep and Python CodeQL cover SAST; pip-audit and Trivy cover resolved dependencies; Gitleaks and Trivy cover secrets; zizmor and actionlint cover Actions. |
 | `scorecard.yml` | `.github/workflows/scorecard.yml` | Posture analysis and policy checks run on PRs with repository contents access. Authenticated publication runs only from the default branch or repository events. |
 | `deploy-github-pages.yml` | `.github/workflows/deploy-github-pages.yml` | MkDocs builds the existing CLI documentation. Deployment uses the protected `github-pages` environment on main. |
@@ -59,6 +59,12 @@ up-to-date branch and passing checks; administrators are subject to protection.
 Individual security gates, the aggregate gates and `Documentation build` are
 required. Publishing artifacts, an absent job or a green workflow with skipped
 scanning is insufficient.
+
+The CLI matrix has nine OS/Python combinations. Additional Action cases distinguish
+an optional absent default waiver from an explicitly selected absent file.
+The `OPA policy contract` job verifies allow, deny, compilation failure and
+undefined decisions with a checksum-verified OPA 1.21.1 binary. `Release checks`
+requires that job to succeed.
 
 ## Reproducibility and credentials
 

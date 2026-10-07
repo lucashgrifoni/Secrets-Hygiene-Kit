@@ -28,9 +28,10 @@ Establish permissions, consumers, exposure window and distribution through
 repositories, logs, packages or images. Treat public exposure as requiring
 containment even when use cannot yet be confirmed.
 
-A `verified=live` label is a claim imported from the detector report at scan
-time. secguard does not test the credential. Absence of the label does not
-prove that access is invalid.
+Version 0.5.0 labels imported verification as `verified=detector:true`
+(0.4.0 used `verified=live`). This is a claim from the detector
+report at its scan time. secguard does not test the credential. A false or
+missing verification value does not prove that access is invalid.
 
 ## Contain and replace at the issuer
 

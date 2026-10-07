@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "secrets-hygiene-kit"
-version = "0.4.0"
+version = "0.5.0"
 description = "secguard: normalize secret-scanner reports, enforce waiver lifecycle, and run leak response playbooks."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -57,6 +57,7 @@ secguard = [
   "playbooks/*/PLAYBOOK.md",
   "templates/*.yaml",
   "templates/*.yml",
+  "templates/*.rego",
 ]
 
 [tool.pytest.ini_options]

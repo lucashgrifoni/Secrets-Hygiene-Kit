@@ -1,7 +1,9 @@
 # Quickstart
 
-Install the versioned wheel using the [README](https://github.com/lucashgrifoni/secrets-hygiene-kit/blob/main/README.md#install-040).
+Install the versioned wheel using the [README](https://github.com/lucashgrifoni/secrets-hygiene-kit/blob/main/README.md#install-050).
 Use the virtual environment's executable for every command below.
+
+These examples target 0.5.0. Earlier release artifacts retain their original behavior.
 
 ## 1. Create the starter files
 
@@ -47,7 +49,29 @@ collect a smaller repository scope rather than treating that error as a scan res
 
 At a shared type, path and line, findings combine at the highest reported
 severity. `Verified: true` in a TruffleHog report raises severity to Critical;
-the CLI's `verified=live` label refers to that imported report claim.
+the CLI's `verified=detector:true` label refers to that imported report claim.
+`verified=detector:false` and `verified=not-reported` do not establish that a
+credential is invalid. secguard does not contact the provider.
+
+For canonical JSON without waiver evaluation, normalize the original reports:
+
+```console
+secguard scan normalize --input gitleaks.json --input trufflehog.jsonl --input .secrets.baseline --output findings.json
+```
+
+Repeat `--input` to combine detectors with the same classification and
+coalescing as the gate. Normalization exits with `0` when it succeeds, even
+with Critical findings. Use `check` to enforce a severity threshold.
+Canonical `secguard.findings/v1` JSON is also accepted as input. For example:
+
+```console
+secguard scan check --input findings.json --sarif secguard.sarif
+```
+
+Reimport recomputes classification and identifiers and preserves the stronger
+imported/catalog severity. It does not prove the report's source is trustworthy.
+Use `--format betterleaks` for Betterleaks 1.x JSON; auto-detection treats its
+ambiguous array as Gitleaks. Normalize it explicitly before combining producers.
 
 ## 4. Export evidence
 
@@ -59,9 +83,19 @@ These options write files. Upload SARIF through your workflow. For optional
 automatic PR summaries, configure the composite action as described in
 [PR comments](pr-comments.md).
 
+Give each export a distinct path, separate from every input, the selected
+waiver file and any explicitly selected rule catalog. A conflicting destination
+exits with `2` before any export is written. Writes after preflight remain
+sequential: permission changes or other I/O errors may leave earlier exports.
+
 To hand off active findings, add `--remediation remediation.json --repository
 acme/example`. The [Hub bridge](remediation-hub.md) validates the exchange and
 offers a local import plus GitHub issue preview.
+Add `--opa-input opa.json` or `--defectdojo defectdojo.json` for the external
+consumers described in [OPA and DefectDojo](integrations.md).
+
+An omitted waiver flag uses the optional `.secguard/waivers.yaml` default.
+If `--waivers FILE` is explicit, FILE must exist or the command exits with `2`.
 
 SARIF rules identify the canonical type, with a severity suffix for overrides.
 Waived findings remain visible as suppressions. Review sensitive metadata
@@ -128,4 +162,5 @@ waiver policy. See [adding-playbook.md](adding-playbook.md) for extension work.
 | no report in the CI starter | configure and install the detector step |
 | a partial waiver leaves a finding active | review every contributing rule |
 | output refuses a linked directory | choose a regular destination in the checkout |
+| exit 2 with conflicting outputs | choose distinct output paths and keep scanner reports, waivers and rules as inputs |
 | an unmapped rule uses a generic playbook | identify the provider and add a reviewed mapping |

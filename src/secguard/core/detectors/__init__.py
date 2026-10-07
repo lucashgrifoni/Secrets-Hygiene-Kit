@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Literal, get_args
 
 from secguard.core.catalog import RuleCatalog, load_catalog
-from secguard.core.detectors import detect_secrets, gitleaks, trufflehog
+from secguard.core.detectors import betterleaks, canonical, detect_secrets, gitleaks, trufflehog
 from secguard.core.findings import (
     FindingDocument,
     FindingFileNotFound,
@@ -30,7 +30,9 @@ from secguard.core.findings import (
     read_bounded_report,
 )
 
-ReportFormat = Literal["auto", "gitleaks", "trufflehog", "detect-secrets", "synthetic"]
+ReportFormat = Literal[
+    "auto", "gitleaks", "trufflehog", "detect-secrets", "synthetic", "canonical", "betterleaks"
+]
 
 SUPPORTED_FORMATS: tuple[str, ...] = tuple(
     name for name in get_args(ReportFormat) if name != "auto"
@@ -115,6 +117,10 @@ def load_report(
 
     if resolved_format == "synthetic":
         return load_synthetic_scan_file(path, resolved_catalog)
+    if resolved_format == "canonical":
+        return canonical.parse_report(text, source=str(path), catalog=resolved_catalog)
+    if resolved_format == "betterleaks":
+        return betterleaks.parse_report(text, source=str(path), catalog=resolved_catalog)
     if resolved_format == "gitleaks":
         return gitleaks.parse_report(text, source=str(path), catalog=resolved_catalog)
     if resolved_format == "trufflehog":
@@ -155,6 +161,8 @@ def detect_format(text: str, *, source: Path | str) -> str:
 
     if isinstance(content, dict) and content.get("schema") == SYNTHETIC_SCHEMA_KEY:
         return "synthetic"
+    if isinstance(content, dict) and content.get("schema") == "secguard.findings/v1":
+        return "canonical"
     if detect_secrets.looks_like_detect_secrets(content):
         return "detect-secrets"
     if gitleaks.looks_like_gitleaks(content):

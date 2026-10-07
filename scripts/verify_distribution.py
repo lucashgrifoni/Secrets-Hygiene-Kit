@@ -46,7 +46,12 @@ def run(argv: list[str], cwd: Path, *, expected: int = 0) -> str:
 def required_resources() -> set[str]:
     package = ROOT / "src" / "secguard"
     resources = {"secguard/py.typed", "secguard/data/rules.yaml"}
-    for pattern in ("templates/*.yaml", "templates/*.yml", "playbooks/*/PLAYBOOK.md"):
+    for pattern in (
+        "templates/*.yaml",
+        "templates/*.yml",
+        "templates/*.rego",
+        "playbooks/*/PLAYBOOK.md",
+    ):
         resources.update(
             f"secguard/{path.relative_to(package).as_posix()}" for path in package.glob(pattern)
         )
@@ -130,11 +135,16 @@ def smoke(cli: Path, project: Path, version: str) -> None:
         encoding="utf-8",
     )
     invoke("scan", "check", "--input", "clean.json", "--fail-on", "high")
+    invoke("scan", "check", "--input", "clean.json", "--waivers", "absent.yaml", expected=2)
+    invoke("policy", "show", "--output", "secguard.rego")
+    if "package secguard" not in (project / "secguard.rego").read_text(encoding="utf-8"):
+        raise RuntimeError("installed policy resource is missing")
+    invoke("scan", "normalize", "--input", "leaked.json", "--output", "canonical.json")
     blocked = invoke(
         "scan",
         "check",
         "--input",
-        "leaked.json",
+        "canonical.json",
         "--fail-on",
         "high",
         "--sarif",
@@ -145,6 +155,10 @@ def smoke(cli: Path, project: Path, version: str) -> None:
         "comment.md",
         "--remediation",
         "remediation.json",
+        "--opa-input",
+        "opa.json",
+        "--defectdojo",
+        "defectdojo.json",
         "--repository",
         "acme/distribution-smoke",
         expected=1,
@@ -152,12 +166,26 @@ def smoke(cli: Path, project: Path, version: str) -> None:
     if "BLOCK" not in blocked:
         raise RuntimeError("blocking exit code did not contain a BLOCK verdict")
     invoke("scan", "check", "--input", "invalid.json", "--fail-on", "high", expected=2)
-    for name in ("blocked.sarif", "blocked.md", "comment.md", "remediation.json"):
+    for name in (
+        "canonical.json",
+        "blocked.sarif",
+        "blocked.md",
+        "comment.md",
+        "remediation.json",
+        "opa.json",
+        "defectdojo.json",
+    ):
         if CANARY in (project / name).read_text(encoding="utf-8"):
             raise RuntimeError(f"secret canary leaked into {name}")
     sarif = json.loads((project / "blocked.sarif").read_text(encoding="utf-8"))
     if not sarif["runs"][0]["results"]:
         raise RuntimeError("blocking fixture produced no SARIF finding")
+    if json.loads((project / "opa.json").read_text())["gate"]["passed"] is not False:
+        raise RuntimeError("installed OPA export lost the blocking decision")
+    dojo = json.loads((project / "defectdojo.json").read_text())["findings"]
+    if len(dojo) != 1 or dojo[0]["verified"] is not False:
+        raise RuntimeError("installed DefectDojo export lost findings or triage semantics")
+    invoke("scan", "check", "--input", "canonical.json", "--json", "canonical.json", expected=2)
     exchange = json.loads((project / "remediation.json").read_text(encoding="utf-8"))
     if (
         exchange["schema"] != "secguard.remediation/v1"
@@ -192,20 +220,28 @@ def verify(dist: Path, requirements_output: Path | None) -> None:
         raise RuntimeError("expected exactly one wheel and one sdist")
     wheel, sdist = wheels[0].resolve(), sdists[0].resolve()
     version = inspect_archives(wheel, sdist)
-    with tempfile.TemporaryDirectory(prefix="secguard-distribution-") as temporary:
+    # Keep paths short for a direct sdist build on Windows without LongPathsEnabled.
+    with tempfile.TemporaryDirectory(prefix="sgd-") as temporary:
         work = Path(temporary)
         if work.is_relative_to(ROOT):
             raise RuntimeError("distribution smoke must run outside the checkout")
         requirements = work / "runtime-requirements.txt"
         for kind, artifact in (("wheel", wheel), ("sdist", sdist)):
-            environment = work / f"{kind}-env"
-            project = work / f"{kind}-project"
+            environment = work / kind[0]
+            project = work / f"{kind[0]}p"
             project.mkdir()
             run([sys.executable, "-m", "venv", str(environment)], work)
             binaries = environment / ("Scripts" if os.name == "nt" else "bin")
             python = binaries / ("python.exe" if os.name == "nt" else "python")
             cli = binaries / ("secguard.exe" if os.name == "nt" else "secguard")
-            install = [str(python), "-m", "pip", "install", "--disable-pip-version-check"]
+            install = [
+                str(python),
+                "-m",
+                "pip",
+                "install",
+                "--disable-pip-version-check",
+                "--no-cache-dir",
+            ]
             if kind == "sdist":
                 install += ["--constraint", str(requirements)]
             run([*install, str(artifact)], project)

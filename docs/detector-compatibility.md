@@ -1,5 +1,42 @@
 # Detector compatibility corpus
 
+## Betterleaks 1.9.0
+
+The [Betterleaks corpus](https://github.com/lucashgrifoni/secrets-hygiene-kit/tree/main/tests/fixtures/betterleaks-1.9.0) was captured on
+Windows amd64 with the official 1.9.0 executable and checksum-verified archive.
+The actual `dir` scan returned two findings for constructed input and none for
+clean input. The malformed path case is derived test data, not producer output.
+The [provenance record](https://github.com/lucashgrifoni/secrets-hygiene-kit/blob/main/tests/fixtures/betterleaks-1.9.0/provenance.json) records
+binary, input, raw-report and sanitized-fixture hashes and command arguments.
+Credential validation was not enabled for the capture.
+
+Select the adapter explicitly:
+
+```console
+secguard scan normalize --input betterleaks.json --format betterleaks --output betterleaks-canonical.json
+secguard scan check --input betterleaks-canonical.json --input trufflehog.jsonl
+```
+
+Betterleaks 1.x uses an array resembling Gitleaks JSON. Auto-detection keeps
+Gitleaks identity for that ambiguous shape; the explicit adapter keeps
+`betterleaks:` rule identity and independent waiver scopes. Reported
+`ValidationStatus: valid` maps to true/Critical; invalid and revoked map to false.
+Missing, unknown, error and needs-validation map to null. Unrecognized values
+fail rather than silently weakening results. These are imported report claims,
+with no provider request by secguard.
+
+Betterleaks 2.x envelopes are outside this adapter. The capture script requires
+the pinned Windows binary hash; its help describes reproduction:
+
+```console
+python scripts/capture_betterleaks_fixtures.py --help
+```
+
+Regression tests check corpus hashes, identity, classification, clean/malformed
+inputs, verification semantics and credential-canary redaction.
+
+## Original producer corpus
+
 secguard parses detector reports. The corpus in
 [`tests/fixtures/producer_versions`](https://github.com/lucashgrifoni/secrets-hygiene-kit/blob/main/tests/fixtures/producer_versions) records
 formats observed by running pinned producers against synthetic inputs on

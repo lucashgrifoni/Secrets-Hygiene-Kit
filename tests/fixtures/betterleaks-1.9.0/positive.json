@@ -1,0 +1,49 @@
+[
+  {
+    "Attributes": {
+      "canary": "SECGUARD-BETTERLEAKS-CANARY-Attributes"
+    },
+    "Author": "SECGUARD-BETTERLEAKS-CANARY-0-Author",
+    "Commit": "",
+    "ComponentSets": "SECGUARD-BETTERLEAKS-CANARY-0-ComponentSets",
+    "Date": "",
+    "Description": "Identified an AWS access key ID paired with a secret access key, which together can provide full access to AWS services.",
+    "Email": "SECGUARD-BETTERLEAKS-CANARY-0-Email",
+    "EndColumn": 38,
+    "EndLine": 2,
+    "Entropy": 4.121928,
+    "File": "sample.env",
+    "Fingerprint": "sample.env:aws-access-token:2",
+    "Match": "SECGUARD-BETTERLEAKS-CANARY-0-Match",
+    "Message": "SECGUARD-BETTERLEAKS-CANARY-0-Message",
+    "RuleID": "aws-access-token",
+    "Secret": "SECGUARD-BETTERLEAKS-CANARY-0-Secret",
+    "StartColumn": 19,
+    "StartLine": 2,
+    "SymlinkFile": "",
+    "Tags": []
+  },
+  {
+    "Attributes": {
+      "canary": "SECGUARD-BETTERLEAKS-CANARY-Attributes"
+    },
+    "Author": "SECGUARD-BETTERLEAKS-CANARY-1-Author",
+    "Commit": "",
+    "Date": "",
+    "Description": "Uncovered a GitHub Personal Access Token, potentially leading to unauthorized repository access and sensitive content exposure.",
+    "Email": "SECGUARD-BETTERLEAKS-CANARY-1-Email",
+    "EndColumn": 53,
+    "EndLine": 4,
+    "Entropy": 4.821928,
+    "File": "sample.env",
+    "Fingerprint": "sample.env:github-pat:4",
+    "Match": "SECGUARD-BETTERLEAKS-CANARY-1-Match",
+    "Message": "SECGUARD-BETTERLEAKS-CANARY-1-Message",
+    "RuleID": "github-pat",
+    "Secret": "SECGUARD-BETTERLEAKS-CANARY-1-Secret",
+    "StartColumn": 14,
+    "StartLine": 4,
+    "SymlinkFile": "",
+    "Tags": []
+  }
+]
