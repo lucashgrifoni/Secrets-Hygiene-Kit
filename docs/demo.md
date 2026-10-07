@@ -18,7 +18,7 @@ git clone https://github.com/lucashgrifoni/secrets-hygiene-kit.git
 cd secrets-hygiene-kit
 ```
 
-[Install the versioned wheel](../README.md#install-050) and activate its
+[Install the versioned wheel](https://github.com/lucashgrifoni/secrets-hygiene-kit/blob/main/README.md#install-050) and activate its
 virtual environment. Then run:
 
 ```console
@@ -57,4 +57,4 @@ or that an application was remediated. The fixed dates keep the example
 reproducible after the sample waiver expires. Use the current date for real CI.
 
 For real report collection and scanner failures, follow the
-[quickstart](quickstart.md) and [CI integration guide](../README.md#ci-integration).
+[quickstart](quickstart.md) and [CI integration guide](https://github.com/lucashgrifoni/secrets-hygiene-kit/blob/main/README.md#ci-integration).

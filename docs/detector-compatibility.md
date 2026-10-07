@@ -2,11 +2,11 @@
 
 ## Betterleaks 1.9.0
 
-The [Betterleaks corpus](../tests/fixtures/betterleaks-1.9.0) was captured on
+The [Betterleaks corpus](https://github.com/lucashgrifoni/secrets-hygiene-kit/tree/main/tests/fixtures/betterleaks-1.9.0) was captured on
 Windows amd64 with the official 1.9.0 executable and checksum-verified archive.
 The actual `dir` scan returned two findings for constructed input and none for
 clean input. The malformed path case is derived test data, not producer output.
-The [provenance record](../tests/fixtures/betterleaks-1.9.0/provenance.json) records
+The [provenance record](https://github.com/lucashgrifoni/secrets-hygiene-kit/blob/main/tests/fixtures/betterleaks-1.9.0/provenance.json) records
 binary, input, raw-report and sanitized-fixture hashes and command arguments.
 Credential validation was not enabled for the capture.
 
@@ -38,7 +38,7 @@ inputs, verification semantics and credential-canary redaction.
 ## Original producer corpus
 
 secguard parses detector reports. The corpus in
-[`tests/fixtures/producer_versions`](../tests/fixtures/producer_versions) records
+[`tests/fixtures/producer_versions`](https://github.com/lucashgrifoni/secrets-hygiene-kit/blob/main/tests/fixtures/producer_versions) records
 formats observed by running pinned producers against synthetic inputs on
 2026-10-05. It provides regression evidence for the cases below.
 
@@ -72,13 +72,13 @@ The Gitleaks generic finding remains a separate low-severity finding.
 
 ## Provenance and redaction
 
-[`producer-lock.json`](../tests/fixtures/producer_versions/producer-lock.json)
+[`producer-lock.json`](https://github.com/lucashgrifoni/secrets-hygiene-kit/blob/main/tests/fixtures/producer_versions/producer-lock.json)
 records the official download URLs, archive hashes, executable hashes and seven
 wheel versions/hashes used for capture. Archive hashes matched both release
 asset digests and the vendors' checksum files. Wheel hashes matched PyPI's
 published digests. Signature verification was not performed.
 
-[`provenance.json`](../tests/fixtures/producer_versions/provenance.json) records
+[`provenance.json`](https://github.com/lucashgrifoni/secrets-hygiene-kit/blob/main/tests/fixtures/producer_versions/provenance.json) records
 producer versions, commands, regeneration-script hash, input hashes, original report hashes, curated
 fixture hashes and observed rule/location metadata. Original reports and
 execution receipts remain in the ignored evidence area. The committed files
@@ -114,7 +114,7 @@ trufflehog filesystem . --json --no-verification --no-update --fail-on-scan-erro
 detect-secrets scan --all-files --no-verify
 ```
 
-The [`regeneration script`](../scripts/regenerate_detector_fixtures.py) creates
+The [`regeneration script`](https://github.com/lucashgrifoni/secrets-hygiene-kit/blob/main/scripts/regenerate_detector_fixtures.py) creates
 the inputs, checks versions and pinned native executable hashes, captures the
 reports and applies the transformations above. It accepts explicit CLI paths:
 
@@ -143,7 +143,7 @@ and [detect-secrets documentation](https://github.com/Yelp/detect-secrets/blob/v
 
 ## Regression checks and limits
 
-[`test_producer_versions.py`](../tests/test_producer_versions.py) contains 26
+[`test_producer_versions.py`](https://github.com/lucashgrifoni/secrets-hygiene-kit/blob/main/tests/test_producer_versions.py) contains 26
 cases covering the recorded corpus. The tests need no producer installation.
 
 | Contract | Cases | Oracle |
