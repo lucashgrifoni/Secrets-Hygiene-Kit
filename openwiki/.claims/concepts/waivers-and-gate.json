@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:d72cf8d086b330cd21ae9e01edb961d6be021958f5fe0ca308c168bf26ee471e",
+  "claims": [
+    {
+      "id": "claim_1436d884eba749169a928369c7ac63b0",
+      "statement": "Waivers require reviewed ownership/approval/scope metadata and expire only when expires_at is earlier than the checked date.",
+      "evidence": [
+        {
+          "resource": "repo://src/secguard/core/waivers.py#L66-L168",
+          "version": "repo-lines-v1:sha256:8043aa07e5fc81b04c5a21988867016b1d47639506576a51afe122be6f4ee21a:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAzLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJjZWRmNzBmMjRlMjEwNGEyNGI1NWQ4NjdiOWY2ZTVkNjJhYTExNDk3MDI0NThhMjI5OGRiNmNhNTJjYmQwNGU1IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI3NzJlNzZhY2ZjNGY1YmM5ZDEzNDczMDM0YzYyYjIwMDVjOGY5ZjQ1MTgxYTBmMWQ4YTFjYWJhYjEzNGQwZDMzIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI4MGFlNmMyYzU3MWU0ZGQ4NTIzYzVlZWY5OTQ1Nzg4ZTQ1NjM4ZjliZTRiY2YwMjg2NmZiMWE4OWE4NGI5YjJlIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI5MzAxYzNlMWFkZjUzNTM1NGJmZGYwNzkwYzUyNjM2OGYwYTNhMmRkODc2MzQwYWE2YWE4NzY0YWU4MTNjNjA3In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_699c20abe1b142b1b271c5092c325e8d",
+      "statement": "A detector-scoped waiver must cover all contributing rules of a merged finding; a secret-type waiver matches the canonical type.",
+      "evidence": [
+        {
+          "resource": "repo://src/secguard/core/waivers.py#L170-L188",
+          "version": "repo-lines-v1:sha256:2fab32f4ef81fefb2ef59c34631de94250db62a7575354f6603d2846a248503f:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFkYjg1ZDFhNjMxNDQwZTEyOTQwMGYxMmU5MGE1OWFkZjE0YzFhMzEzMjgyMGY5Zjc4MjI5NjYzMGZlOWYyNmQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNiZjM0N2NjYjg3NDRlZmZkNjhhN2YzYjU1ZDMwZjIzY2ZkNGM2NGM2M2U5OTY4M2RmZTQ5OTFkY2RjNDY3NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJkODkxZTZlN2UzZWM0MDQwYmFmMzNlODY5NGFiODA3MDFjYWZmNTQ0OTE0OTY3OGE2MzdjYTU1MzFjMDgxZGIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjMzOWVlNmIwMjNhODRkNzgzNDAxZmQ2ZjcxYjVjYjU2OGNiM2NkOWQwNDkyN2VhZmJlM2UzNmRlMmE4MmUyMjIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_f001cab64e81407980495e83913d4eba",
+      "statement": "The core scan outcome fails for threshold-blocking active findings or expired waivers, including expiry when the severity threshold is none.",
+      "evidence": [
+        {
+          "resource": "repo://src/secguard/core/reconcile.py#L49-L88",
+          "version": "repo-lines-v1:sha256:8abb446fec9ec698bb0aa266d98f475e763380fa12545c01dace50bab26ef730:eyJzZWxlY3RlZExpbmVDb3VudCI6NDAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM3NDRjYzVmZjM4YTNiNzA2NjgyODVjZjA0ZjdlYjZjM2ExZTNjMjJkODI3NjNmNzFhMzBkNDFiMzQ2OWUyMTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjcwY2UzZjI0YWI0N2MyZjVhOWQzMzdmMzc3ZWQ4NTczZmE1NjU4NDA3NjQwMmYxYWYwNTRhM2RlZDYxOTQ2MmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBlZjM4YzliYzQwNTEyNjEwYjFhYzY1YjBmNDlmNDk0OGI4OTcxMTM1NTUyNDllMmZkMGYxNjQyYjk2N2NmNTgifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-14T19:27:23.043Z"
+  }
+}

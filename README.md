@@ -388,3 +388,7 @@ reports in public issues.
 ## License
 
 Licensed under [Apache-2.0](LICENSE).
+
+## Repository wiki
+
+[Source-linked repository guide](openwiki/quickstart.md) · [OpenWiki setup and maintenance](docs/openwiki.md).
