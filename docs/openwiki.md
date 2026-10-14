@@ -1,6 +1,6 @@
 # Repository wiki with OpenWiki
 
-Start at the [repository wiki](../openwiki/quickstart.md) to find explanations linked to source. Existing user guides remain the full reference.
+Start at the [repository wiki](https://github.com/lucashgrifoni/Secrets-Hygiene-Kit/blob/main/openwiki/quickstart.md) to find explanations linked to source. Existing user guides remain the full reference.
 
 ## Local integration
 
@@ -11,7 +11,7 @@ npm install --global openwiki@0.7.2
 openwiki integrations install codex --project .
 ~~~
 
-Restart Codex in the repository, then request an update of the existing wiki. Other hosts are described in the [upstream quick start](https://github.com/langchain-ai/openwiki#quick-start). The repository brief is in [INSTRUCTIONS.md](../openwiki/INSTRUCTIONS.md); the source exclusions are in [.openwikiignore](../.openwikiignore).
+Restart Codex in the repository, then request an update of the existing wiki. Other hosts are described in the [upstream quick start](https://github.com/langchain-ai/openwiki#quick-start). The repository brief is in [INSTRUCTIONS.md](https://github.com/lucashgrifoni/Secrets-Hygiene-Kit/blob/main/openwiki/INSTRUCTIONS.md); the source exclusions are in [.openwikiignore](https://github.com/lucashgrifoni/Secrets-Hygiene-Kit/blob/main/.openwikiignore).
 
 ## Maintenance and limits
 
