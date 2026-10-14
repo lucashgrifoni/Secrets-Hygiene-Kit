@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:c16cd83f258af239fe81e463aa2b948c7b0014aecd45a5cf70dc7dfe20d9b822",
+  "claims": [
+    {
+      "id": "claim_d274550a663e46efa02838c2308789e6",
+      "statement": "The package registers secguard and requires Python>=3.12.",
+      "evidence": [
+        {
+          "resource": "repo://pyproject.toml#L47-L48",
+          "version": "repo-lines-v1:sha256:e0619f8426082030157a3ab80b8c2e9986946988daf75dcb84ab7724669ca17f:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNGVhYjRlYzYzZGU1MTdkYTRjZDhlNWM4MzA3ZmIyYzc3MzdkMzkxOTBhYjY5ZjMyYTVlOWVmODFlYTQ0MTZkZSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNDViZWRkODAzYzk1MGZhZGNmMjhlNDI3ZWJlNTA4MDkxNjEyMDMwYjE5N2M4NGM2ZGFiYzE2MTI1ZGE4NzdmNyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMDQyNWFjMDNmMTUwZDVjOTNhNzRjZGUwZTVkZjMyYjY4MjA2MGQ1NjEwOWEzNTVmZDFlNzRjMDU0ZTRhZDAwMiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYTU2MGIzOTQ4OGJiZmZjOGQxY2NkMzExODgzYmU0N2UxODFhZTlhYzIyNDllMjc4YTdmYzRmMTczZTQ0N2RhZSJ9"
+        },
+        {
+          "resource": "repo://pyproject.toml#L5-L11",
+          "version": "repo-lines-v1:sha256:01b6d17a2d8df53bcffad66cc00a5129662b0cc9f7fc0cf465dc53765ca686a2:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNzAyYTgxYzM4MzZlZGVmMmQwYmExMWQyMzUzZmI2ZGFiYzc3NzE1MGE3Y2E4M2VhMGQ5ZTlhNzAzMTNmZWFiYiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMWY4NmQ3ZjRkM2Q4YzgxMjZhNGRmMjM5ZjZkMDA5OTg3MGMyOWNkYWE1NTk1Njg1Njc1M2MyNDBkY2I0YzhmYyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYjkxZjdlZTk4Y2I5NjliN2Y3YTA1MTIzOGM4ZGIzNWFjMDE1ODg0ZjgyMDI5OTk1YzJiOTc4M2IzMzdjNGUyOCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNTk5OWJjNWQwOTY4ZTE4NjVjMWE1M2Q0ZTJjODVmOGFkM2RhZjQ0YWZlMTUyZmVmMWE4YTQyNzViNGZjMjQ1YSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_eb71f2e2b3dd452c9ff029d0543051f1",
+      "statement": "The scan-check workflow loads canonical findings and waivers, reconciles them for a checked date and emits requested reports before the selected exit decision.",
+      "evidence": [
+        {
+          "resource": "repo://src/secguard/cli/app.py#L558-L619",
+          "version": "repo-lines-v1:sha256:55343e4a3b6bc5ac4282e204c2323fbd46b5a35f5ee6c797a933f2e8a9566b3c:eyJzZWxlY3RlZExpbmVDb3VudCI6NjIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk4MzZjYmY3ZTA3ZDQ0NWYxNmM0MmZkY2Q3NTg3OGQ0OTY4ZjE4YWE5ZDYyOTI1NjMwODY2MGU4YzdmN2Q4MTgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNhYzY5ZDJlYzJjMTU0NTMyZTE2ZmViYjEwMzhhODNjZjVjOTBhNTFlNWNkYTUyZmRhZjk5ZjM0MDBiMjg4OTYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjUwNjVkZDRiZGI0YWI0NmNkMzY5ZmU0MTM3ZWNhNzUxNGE3NWE1MDBhMmFlZWM5NDA4NDY3ZDE0ZjJkZWUwZDIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFmOTFjOTBhYWU2ODBjMDFlODE1MTY4NjIzOTEzZWQ5ODBlYWM1NDkwN2Y4M2NhMTk1NDI3OWM0ZDJjYjZkMmEifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-14T19:27:23.043Z"
+  }
+}

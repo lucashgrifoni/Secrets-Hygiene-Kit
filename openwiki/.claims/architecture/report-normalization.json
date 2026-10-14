@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:232f83f8f629dd44f1c6caa2c71439ac467daa9694374738cc205af1733fd033",
+  "claims": [
+    {
+      "id": "claim_739486f5fed740159d734938e0bc388f",
+      "statement": "The Gitleaks adapter maps explicit scanner metadata without reading Secret, Match or commit Message credential-bearing fields.",
+      "evidence": [
+        {
+          "resource": "repo://src/secguard/core/detectors/gitleaks.py",
+          "version": "repo-file-v1:sha256:d53a3b1d50945b2d15390ab731def408842993f3676f3c18ec46cef79a7d9408"
+        }
+      ]
+    },
+    {
+      "id": "claim_35e61a4ef849452ca93d51fefd768fce",
+      "statement": "Canonical finding paths reject absolute paths, parent traversal and control characters.",
+      "evidence": [
+        {
+          "resource": "repo://src/secguard/core/findings.py#L66-L93",
+          "version": "repo-lines-v1:sha256:6bc3b5bd0f7038f5010e23b2de71059bd8e64c7904630d7c111b5d5b11185ca8:eyJzZWxlY3RlZExpbmVDb3VudCI6MjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNmNGZmOTFjZjM1MDEyMWY0NGU3N2RkYjgzZjkxMmZhZDkzZDk2Mzc5NTU2YzM3ZWNjMGJmYmYxZDFjNmEyYjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY0MDBjN2Y5ZTQzOGI5MTE5NzBiYmM4MjIxNmJhMTBjNzNiOTY4Njc3OTNiNTYwNTFhOWNlMTRhYzg4NzkzYjQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRlOTQ5OTAxNDYzOGI4MTE0ZjUwYjFhNmE2ZGEwOGE0MjA2NmRhYjVhNGIxMGRlNjU0YmViM2FmOTFkMWZmMGUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_8e3e5426e3304cb2989b066d93f82b5d",
+      "statement": "Merged findings preserve highest severity and corroborating scanner/rule metadata and are deterministically sorted.",
+      "evidence": [
+        {
+          "resource": "repo://src/secguard/core/findings.py#L300-L347",
+          "version": "repo-lines-v1:sha256:69a6e1d84f9bf59096089e4c3374f395e6af51c23347d41147233a64639ac901:eyJzZWxlY3RlZExpbmVDb3VudCI6NDgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZjZDc0ZDI1YjQ5ZjZlZDg3MTAyMmZhODAzNWQ4OWJlNDg2ODM0YTNhODNiZjhlODEzMTA5NDcyYWJkM2E2NzQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImYxZDIzOTY1YTU3ODdmMWMxMTVmOGQ0NjI2ZDZjZDBiOThhZGE5MDU1Yzg0NjNmMGQ0YWZkZWYxYjdkZDk2ODEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_8bf6c38f0dd1405cb9908f1740d86caf",
+      "statement": "Fallback fingerprints derive from scanner/rule/location/message metadata rather than raw credential values.",
+      "evidence": [
+        {
+          "resource": "repo://src/secguard/core/findings.py#L448-L460",
+          "version": "repo-lines-v1:sha256:a68a6c4eda28f2ea27d2b9bd712f7136d668cdb0f11f337d4c29da56148baa47:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYwNjhkMzU5ZDQ0ZTQ3MTFlNGQxNDcyOTIzZTIyMmZhODdmNWM0NTg3OWIzZWQyNzYwZWI5NzVjMTA2MzZlY2IiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFhMjlmNjVhM2FhNmVmMTE2MGM3ZDJjMTVlOGMwZDgxYTRjYzMzNDdiNzU3MDFiNjgxNDQwNTdjNmZkZjFjM2IiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjUwYTM2ZmQ5NTgyZTFiYjkyMDAyNGNjYTRhZTBkMzIxMDRjZTA0ODhjMDcyZjExNTk5ZDAzYTA0MjE0MmRhMTkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-14T19:27:23.043Z"
+  }
+}

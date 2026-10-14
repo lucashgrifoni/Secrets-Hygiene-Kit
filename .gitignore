@@ -38,3 +38,11 @@ secguard-comment.md
 # Generated documentation and CI evidence.
 /site/
 /reports/
+
+# Local OpenWiki integration and generated scheduling scaffold
+/.agents/skills/openwiki/
+/.codex/
+/.github/workflows/openwiki-update.yml
+/AGENTS.md
+/CLAUDE.md
+/GEMINI.md

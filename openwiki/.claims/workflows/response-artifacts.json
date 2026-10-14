@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:637041a1a80b963492cbe8617bac22d3848072e4272cca1c8d3e296cfa7a35f3",
+  "claims": [
+    {
+      "id": "claim_dbe8f2ec34844adbbdfdbf7965815aa1",
+      "statement": "Playbooks are human instructions with vetted-date freshness metadata, not provider revocation or rotation automation.",
+      "evidence": [
+        {
+          "resource": "repo://src/secguard/core/playbooks.py#L1-L27",
+          "version": "repo-lines-v1:sha256:2dfb6359adc2ba5281eb67fbcbda35a2c24cdbc0979cb9d9f3e424036111a538:eyJzZWxlY3RlZExpbmVDb3VudCI6MjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI0NmJmNzJhZGQ5ZWZiM2M4MmRmN2Q5N2MzZTViZDZkNGJiNjk2MWQ4NzM5NGZhNTBkMmVmMjBkYjNlMThmN2EiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgzNDY1NzZjNTNlODAxZTI2YTQ0M2Q2NzlmMGIxMDc5MmQ5ZWJhOTUxMGIxZTAwOWU3NjE5NDcyMTU1MDIwNDIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhmZGIzOGU5ODlhMjk4ZTA3NWI4N2NiZTIwYjY0ODg1MjIzNzRiMmZlMTZmODU1MzM1NWI4NzJjMmYxMzA4ZGIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_e7bf415a539f492c8bcec59b730fcc56",
+      "statement": "Remediation export requires a checked date, exports active findings only, derives occurrence identity and records gate/omitted-waiver metadata.",
+      "evidence": [
+        {
+          "resource": "repo://src/secguard/core/remediation.py#L102-L152",
+          "version": "repo-lines-v1:sha256:9e557526d77d362a488c0f7a0ecc14d1bf7dde0708d2656f13bc8a750d2fd93b:eyJzZWxlY3RlZExpbmVDb3VudCI6NTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjViMjFkMjY0YjAyZWMwMmE1NjNkM2RhY2JjZTA3YzY4YTk0YjNhZWRjYzNmM2VjMjRhYjAyMjkyMjAxYTk4MzMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkwZGNjMzQ5MjExZWRiNWZiNzI4MTJhOGVjODVkMjA4ZTYyMTlhYWViZmZiOTRkZmZhNzVlMTc1NmUxYTRkZTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRiNTMwZWRlNGYzZTg4MmQ2ZTg1ZTllNmE3N2JiYTI5NTk5OTk3MWU2NTk5NGU0ZTA0MWJjMDAzYjE1NzhkMmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjNjY2MwOTNkMjVhMjk4Y2JiMmQ1YWVhYzNmMWNkMGI0ZjdlMzYwN2E4NzQ2OGQ2N2Q1YzU1MzM3MDVkNGZlMmIifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.7.2",
+    "at": "2026-10-14T19:27:23.043Z"
+  }
+}
