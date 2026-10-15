@@ -1,7 +1,8 @@
 """Exercise Generic Findings Import on an owned, loopback-only Docker pilot.
 
-This validation script creates a synthetic product and engagement. It obtains
-an ephemeral API key inside the local pilot; no key is printed or persisted.
+This validation script creates a synthetic product and engagement. It reads
+or creates the pilot user's API token, which persists in the pilot database.
+The value is captured in memory and omitted from console and result output.
 It is separate from secguard, which only exports files and stays offline.
 """
 

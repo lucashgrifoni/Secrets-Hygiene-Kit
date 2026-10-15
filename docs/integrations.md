@@ -76,6 +76,11 @@ and unauthenticated rejection were exercised on an owned local instance with
 synthetic data. No external adopter or production instance was involved.
 
 The optional script creates synthetic products in an owned local Docker pilot.
+
+The validator reads or creates the synthetic user's API token. DefectDojo keeps
+it in the local pilot database; the script does not revoke it after a run.
+The value is captured in memory and excluded from console and result files.
+
 It requires a `uwsgi` service, synthetic account `secguard_pilot`, the matching
 setting above and a loopback endpoint at port 18087:
 
