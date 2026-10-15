@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.0.0] - 2026-10-15
+
+- Define the stable 1.x contract for the existing CLI, exit codes, document
+  schemas, waiver policy, finding identity and composite Action.
+- Document compatibility, deprecation and schema evolution, supported Python
+  environments, tested producer/consumer versions and rollback to 0.5.0.
+- Keep the optional Remediation Hub Python bridge experimental; retain the
+  stable `secguard.remediation/v1` file exchange.
+- Set the 1.0 security maintenance policy to the latest 1.0.x release and main;
+  earlier beta releases are superseded when 1.0.0 is published.
+- Update generated CI starter references and installation examples to 1.0.0.
+
+### Migrating to 1.0.0
+
+The CLI's runtime behavior, schema identifiers, waiver/catalog file formats,
+gate exits and export identity algorithms are retained from 0.5.0. Producer
+version strings, versioned playbook links and generated CI references change
+to 1.0.0. Existing scanner reports and policies do not require conversion.
+
+Pin the reviewed release, preserve scanner versions and policy snapshots, and
+replay representative decisions with an explicit check date before switching
+CI. See [compatibility and support](docs/compatibility.md) for the stable
+interfaces, consumer settings and migration/rollback procedure. Internal pilot
+results and historical corpus captures do not establish external adoption or
+production acceptance.
+
 ## [0.5.0] - 2026-10-07
 
 - Accept repeated `--input` in `scan normalize`, sharing classification and

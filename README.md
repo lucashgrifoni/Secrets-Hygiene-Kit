@@ -5,7 +5,7 @@
 [![Scorecard](https://github.com/lucashgrifoni/secrets-hygiene-kit/actions/workflows/scorecard.yml/badge.svg?branch=main)](https://github.com/lucashgrifoni/secrets-hygiene-kit/actions/workflows/scorecard.yml)
 [![Documentation](https://github.com/lucashgrifoni/secrets-hygiene-kit/actions/workflows/deploy-github-pages.yml/badge.svg?branch=main)](https://github.com/lucashgrifoni/secrets-hygiene-kit/actions/workflows/deploy-github-pages.yml)
 
-[0.5.0 beta](https://github.com/lucashgrifoni/secrets-hygiene-kit/releases/tag/v0.5.0)
+[1.0.0](https://github.com/lucashgrifoni/secrets-hygiene-kit/releases/tag/v1.0.0)
 · Python 3.12 / 3.13 / 3.14 · [Apache-2.0](LICENSE)
 
 **Turn secret-scanner reports into consistent CI decisions and response guidance.**
@@ -17,7 +17,7 @@ applies expiring exceptions and produces reports that reviewers can act on.
 Detection runs in your scanner. Credential changes remain with the authorized
 responder. secguard processes reports locally and never contacts a credential provider.
 
-[Install](#install-050) · [Quickstart](#quickstart) · [CLI](#cli-reference) ·
+[Install](#install-100) · [Quickstart](#quickstart) · [CLI](#cli-reference) ·
 [CI integration](#ci-integration) · [Documentation](#documentation)
 
 [Documentation site](https://lucashgrifoni.github.io/Secrets-Hygiene-Kit/) ·
@@ -55,11 +55,12 @@ exports. No credential provider is contacted; the example does not revoke or rot
 The adapters also accept synthetic reports for testing. Files are written locally.
 Automatic PR publication requires explicit configuration in the composite action.
 
-## Install 0.5.0
+## Install 1.0.0
 
-The release is **0.5.0 beta**, tested on Linux, Windows and macOS with
-Python **3.12, 3.13 and 3.14**. Install the versioned wheel from
-[GitHub Releases](https://github.com/lucashgrifoni/secrets-hygiene-kit/releases/tag/v0.5.0).
+Version **1.0.0** establishes the [stable 1.x contract](docs/compatibility.md)
+for the existing report-processing CLI. The supported runtime matrix is Linux,
+Windows and macOS with Python **3.12, 3.13 and 3.14**. Install the versioned
+wheel from [GitHub Releases](https://github.com/lucashgrifoni/secrets-hygiene-kit/releases/tag/v1.0.0).
 
 Create a virtual environment:
 
@@ -70,18 +71,18 @@ python -m venv .venv
 ### Linux and macOS
 
 ```console
-.venv/bin/python -m pip install https://github.com/lucashgrifoni/secrets-hygiene-kit/releases/download/v0.5.0/secrets_hygiene_kit-0.5.0-py3-none-any.whl
+.venv/bin/python -m pip install https://github.com/lucashgrifoni/secrets-hygiene-kit/releases/download/v1.0.0/secrets_hygiene_kit-1.0.0-py3-none-any.whl
 .venv/bin/secguard version
 ```
 
 ### Windows
 
 ```console
-.\.venv\Scripts\python.exe -m pip install https://github.com/lucashgrifoni/secrets-hygiene-kit/releases/download/v0.5.0/secrets_hygiene_kit-0.5.0-py3-none-any.whl
+.\.venv\Scripts\python.exe -m pip install https://github.com/lucashgrifoni/secrets-hygiene-kit/releases/download/v1.0.0/secrets_hygiene_kit-1.0.0-py3-none-any.whl
 .\.venv\Scripts\secguard.exe version
 ```
 
-The version command prints `0.5.0`. In the examples below, replace `secguard`
+The version command prints `1.0.0`. In the examples below, replace `secguard`
 with `.venv/bin/secguard` on Linux/macOS or `.\.venv\Scripts\secguard.exe` on Windows,
 or activate that virtual environment first.
 
@@ -163,6 +164,11 @@ Run `secguard --help` or add `--help` to a command for its options.
 Version 0.5.0 includes multi-input normalization, output preflight and explicit
 detector-provenance labels. See [Changelog](CHANGELOG.md) for migration details.
 
+Version 1.0.0 retains those runtime behaviors and defines compatibility,
+deprecation, supported integrations and migration from 0.5.0 in the
+[1.x contract](docs/compatibility.md). The optional Hub Python bridge remains
+experimental; the remediation file exchange is stable.
+
 To combine reports without applying the waiver policy or severity gate:
 
 ```console
@@ -229,7 +235,7 @@ a reviewed Gitleaks version. Use a reviewed commit to pin the action:
   run: gitleaks git --redact --exit-code 0 --report-format json --report-path gitleaks.json
 
 - name: Evaluate secret findings
-  uses: lucashgrifoni/secrets-hygiene-kit@v0.5.0 # pin the reviewed release commit in production
+  uses: lucashgrifoni/secrets-hygiene-kit@v1.0.0 # pin the reviewed release commit in production
   with:
     reports: gitleaks.json
     fail-on: high
@@ -372,6 +378,7 @@ severity suffixes; see the [migration notes](CHANGELOG.md#migration-notes).
 | [PR comments](docs/pr-comments.md) | Trusted publication, permissions and idempotent summaries |
 | [Remediation Hub](docs/remediation-hub.md) | Active-only exchange, local import and issue preview |
 | [Detector compatibility](docs/detector-compatibility.md) | Fixed producer versions, fixture provenance and reproduction |
+| [Compatibility and support](docs/compatibility.md) | Stable 1.x interfaces, schema evolution, support and migration |
 | [OPA and DefectDojo](docs/integrations.md) | Offline file exports, policy evaluation and stable reimport |
 | [Changelog](CHANGELOG.md) | Release changes and migration notes |
 | [Project status](STATUS.md) | Current scope and known limitations |

@@ -2,9 +2,13 @@
 
 ## Supported version
 
-Security fixes target the latest 0.4.x release and the current main development line.
-Earlier versions are superseded.
-This is a beta CLI; the supported Python versions are 3.12, 3.13 and 3.14.
+Security fixes for the 1.0 release line target the latest 1.0.x release and the
+current main development line. Once 1.0.0 is published, earlier beta releases,
+including 0.5.0, are superseded and do not receive separate backports.
+The supported Python versions are 3.12, 3.13 and 3.14 on Linux, Windows and macOS.
+See [compatibility and support](docs/compatibility.md) for the stable 1.x
+interfaces, tested integration versions and migration policy. The optional
+Remediation Hub Python bridge remains experimental.
 
 ## Report a vulnerability
 

@@ -18,7 +18,7 @@ git clone https://github.com/lucashgrifoni/secrets-hygiene-kit.git
 cd secrets-hygiene-kit
 ```
 
-[Install the versioned wheel](https://github.com/lucashgrifoni/secrets-hygiene-kit/blob/main/README.md#install-050) and activate its
+[Install the versioned wheel](https://github.com/lucashgrifoni/secrets-hygiene-kit/blob/main/README.md#install-100) and activate its
 virtual environment. Then run:
 
 ```console
