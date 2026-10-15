@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "secrets-hygiene-kit"
-version = "0.5.0"
+version = "1.0.0"
 description = "secguard: normalize secret-scanner reports, enforce waiver lifecycle, and run leak response playbooks."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -13,7 +13,7 @@ license-files = ["LICENSE"]
 authors = [{ name = "Lucas Henrique Grifoni" }]
 keywords = ["security", "secrets", "appsec", "devsecops", "gitleaks", "trufflehog", "sarif"]
 classifiers = [
-  "Development Status :: 4 - Beta",
+  "Development Status :: 5 - Production/Stable",
   "Environment :: Console",
   "Intended Audience :: Developers",
   "Programming Language :: Python :: 3.12",

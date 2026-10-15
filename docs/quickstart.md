@@ -1,9 +1,11 @@
 # Quickstart
 
-Install the versioned wheel using the [README](https://github.com/lucashgrifoni/secrets-hygiene-kit/blob/main/README.md#install-050).
+Install the versioned wheel using the [README](https://github.com/lucashgrifoni/secrets-hygiene-kit/blob/main/README.md#install-100).
 Use the virtual environment's executable for every command below.
 
-These examples target 0.5.0. Earlier release artifacts retain their original behavior.
+These examples target 1.0.0. Earlier release artifacts retain their original behavior.
+See [compatibility and support](compatibility.md) for the 1.x contract and
+migration from 0.5.0.
 
 ## 1. Create the starter files
 
