@@ -43,7 +43,7 @@ def minimize_findings(document: FindingDocument) -> FindingDocument:
                     update={
                         "message": OMITTED,
                         "remediation": None,
-                            "secret_title": MINIMIZED_TITLE,
+                        "secret_title": MINIMIZED_TITLE,
                     }
                 )
                 for finding in document.findings
@@ -73,7 +73,7 @@ def minimize_catalog(catalog: RuleCatalog) -> RuleCatalog:
     return catalog.model_copy(
         update={
             "secret_types": {
-            key: spec.model_copy(update={"title": MINIMIZED_TITLE})
+                key: spec.model_copy(update={"title": MINIMIZED_TITLE})
                 for key, spec in catalog.secret_types.items()
             }
         }
