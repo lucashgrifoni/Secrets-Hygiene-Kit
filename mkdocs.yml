@@ -20,6 +20,8 @@ nav:
   - Waiver request: waiver-request-template.md
   - Detector compatibility: detector-compatibility.md
   - Compatibility and support: compatibility.md
+  - Output safety: output-safety.md
+  - Metadata policy: metadata-policy.md
   - PR comments: pr-comments.md
   - Remediation Hub: remediation-hub.md
   - OPA and DefectDojo: integrations.md

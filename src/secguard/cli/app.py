@@ -14,6 +14,7 @@ import json
 import os
 import sys
 from datetime import UTC, date, datetime
+from functools import wraps
 from importlib import resources
 from pathlib import Path
 from typing import Annotated
@@ -32,6 +33,13 @@ from secguard.core.catalog import (
 from secguard.core.detectors import SUPPORTED_FORMATS, is_empty_report, load_reports
 from secguard.core.findings import FindingDocument, FindingError, load_synthetic_scan_file
 from secguard.core.incident import render_incident
+from secguard.core.metadata import (
+    metadata_mode,
+    minimize_catalog,
+    minimize_findings,
+    minimize_waivers,
+    minimizing_metadata,
+)
 from secguard.core.playbooks import (
     DEFAULT_MAX_AGE_DAYS,
     PlaybookError,
@@ -52,7 +60,12 @@ from secguard.core.waivers import (
     load_waiver_file,
     load_waiver_file_or_empty,
 )
-from secguard.core.writing import UnsafeWriteError, assert_output_paths, assert_writable
+from secguard.core.writing import (
+    UnsafeWriteError,
+    assert_output_paths,
+    verify_output_manifest,
+    write_outputs,
+)
 
 DEFAULT_WAIVER_FILE = Path(".secguard/waivers.yaml")
 EXIT_INPUT_ERROR = 2
@@ -127,12 +140,31 @@ def use_utf8_output() -> None:
 
 
 def _fail(message: str, code: int = EXIT_INPUT_ERROR) -> typer.Exit:
+    if minimizing_metadata():
+        message = "processing failed with metadata minimized; inspect arguments and inputs locally"
     typer.secho(message, err=True, fg=typer.colors.RED)
     return typer.Exit(code=code)
 
 
 def _note(message: str) -> None:
+    if minimizing_metadata():
+        message = "warning: input or catalog requires review (details omitted by metadata policy)"
     typer.secho(message, err=True, fg=typer.colors.YELLOW)
+
+
+def _metadata_command(function):
+    """Scope an explicitly selected projection to one invocation, including diagnostics."""
+
+    @wraps(function)
+    def invoke(*args, **kwargs):
+        with metadata_mode(kwargs.get("minimize_metadata", False)):
+            return function(*args, **kwargs)
+
+    return invoke
+
+
+def _written(path: Path) -> None:
+    typer.echo("wrote\toutput" if minimizing_metadata() else f"wrote\t{path.as_posix()}", err=True)
 
 
 def _parse_today(today: str | None) -> date:
@@ -175,7 +207,7 @@ def _load_catalog(rules: Path | None) -> RuleCatalog:
         _warn_about_downgrades(catalog)
         _warn_about_missing_playbooks(catalog)
 
-    return catalog
+    return minimize_catalog(catalog)
 
 
 def _warn_about_missing_playbooks(catalog: RuleCatalog) -> None:
@@ -295,10 +327,10 @@ def _audited_override(allow: bool, *, bypassing: str) -> bool:
 def _load_waivers(file: Path, *, required: bool) -> WaiverDocument:
     try:
         if required:
-            return load_waiver_file(file)
+            return minimize_waivers(load_waiver_file(file))
         if not file.exists():
             _note(f"no waiver file at {file.as_posix()}; continuing with zero waivers")
-        return load_waiver_file_or_empty(file)
+        return minimize_waivers(load_waiver_file_or_empty(file))
     except WaiverError as exc:
         raise _fail(str(exc)) from exc
     except OSError as exc:
@@ -330,7 +362,7 @@ def _load_findings(
         )
 
     try:
-        return load_reports(inputs, report_format=report_format, catalog=catalog)  # type: ignore[arg-type]
+        return minimize_findings(load_reports(inputs, report_format=report_format, catalog=catalog))  # type: ignore[arg-type]
     except FindingError as exc:
         raise _fail(str(exc)) from exc
     except OSError as exc:
@@ -349,7 +381,7 @@ def _preflight_outputs(outputs: list[Path | None], protected: list[Path]) -> Non
 
 def _write_output(path: Path, content: str) -> None:
     try:
-        assert_writable(path)
+        write_outputs([(path, content)])
     except UnsafeWriteError as exc:
         raise _fail(str(exc)) from exc
     except OSError as exc:
@@ -357,13 +389,7 @@ def _write_output(path: Path, content: str) -> None:
             f"cannot write {path.as_posix()}: {exc.strerror or 'filesystem error'}"
         ) from exc
 
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8", newline="\n")
-    except OSError as exc:
-        raise _fail(f"cannot write {path.as_posix()}: {exc}") from exc
-
-    typer.echo(f"wrote\t{path.as_posix()}", err=True)
+    _written(path)
 
 
 def _require_inputs(inputs: list[Path] | None) -> list[Path]:
@@ -422,6 +448,7 @@ def init_project(
 
 
 @app.command("report")
+@_metadata_command
 def render_report_command(
     inputs: Annotated[
         list[Path] | None,
@@ -449,6 +476,12 @@ def render_report_command(
         str | None,
         typer.Option("--today", help="Override the current date for deterministic output."),
     ] = None,
+    minimize_metadata: Annotated[
+        bool,
+        typer.Option(
+            "--minimize-metadata", help="Omit caller prose; retain identity and location fields."
+        ),
+    ] = False,
 ) -> None:
     """Render a Markdown scan report without failing the build."""
     resolved_inputs = _require_inputs(inputs)
@@ -475,6 +508,7 @@ def render_report_command(
 
 
 @scan_app.command("check")
+@_metadata_command
 def scan_check(
     inputs: Annotated[
         list[Path] | None,
@@ -524,6 +558,16 @@ def scan_check(
             "--defectdojo", help="Write active findings as DefectDojo Generic Findings Import."
         ),
     ] = None,
+    output_manifest: Annotated[
+        Path | None,
+        typer.Option("--output-manifest", help="Publish a checksummed completion marker last."),
+    ] = None,
+    minimize_metadata: Annotated[
+        bool,
+        typer.Option(
+            "--minimize-metadata", help="Omit caller prose; retain identity and location fields."
+        ),
+    ] = False,
     repository: Annotated[
         str | None,
         typer.Option("--repository", help="Owner/name for --remediation; explicitly required."),
@@ -554,9 +598,22 @@ def scan_check(
             remediation_output,
             opa_output,
             defectdojo_output,
+            output_manifest,
         ],
         [*resolved_inputs, resolved_waivers, *([rules] if rules else [])],
     )
+    if output_manifest is not None and not any(
+        [
+            json_output,
+            sarif_output,
+            markdown_output,
+            comment_output,
+            remediation_output,
+            opa_output,
+            defectdojo_output,
+        ]
+    ):
+        raise typer.BadParameter("--output-manifest requires at least one file export")
     catalog = _load_catalog(rules)
     check_date = _parse_today(today)
 
@@ -589,37 +646,62 @@ def scan_check(
     except FindingError as exc:
         raise _fail(str(exc)) from exc
 
+    # Render every selected artifact before the first destination is replaced.
+    outputs: list[tuple[Path, str]] = []
     if json_output is not None:
-        _write_output(
-            json_output,
-            _dump_json(outcome.document().model_dump(mode="json", by_alias=True)),
+        outputs.append(
+            (json_output, _dump_json(outcome.document().model_dump(mode="json", by_alias=True)))
         )
     if sarif_output is not None:
-        _write_output(
-            sarif_output,
-            _dump_json(build_sarif(outcome, catalog=catalog, version=__version__)),
+        outputs.append(
+            (sarif_output, _dump_json(build_sarif(outcome, catalog=catalog, version=__version__)))
         )
     if markdown_output is not None:
-        _write_output(
-            markdown_output,
-            report_renderer.render_report(outcome, generated_on=check_date, version=__version__),
+        outputs.append(
+            (
+                markdown_output,
+                report_renderer.render_report(
+                    outcome, generated_on=check_date, version=__version__
+                ),
+            )
         )
     if comment_output is not None:
-        _write_output(
-            comment_output,
-            report_renderer.render_pr_comment(outcome, generated_on=check_date),
+        outputs.append(
+            (comment_output, report_renderer.render_pr_comment(outcome, generated_on=check_date))
         )
     if remediation_output is not None and remediation_content is not None:
-        _write_output(remediation_output, remediation_content)
+        outputs.append((remediation_output, remediation_content))
     if opa_output is not None and opa_content is not None:
-        _write_output(opa_output, opa_content)
+        outputs.append((opa_output, opa_content))
     if defectdojo_output is not None and dojo_content is not None:
-        _write_output(defectdojo_output, dojo_content)
+        outputs.append((defectdojo_output, dojo_content))
+    try:
+        write_outputs(outputs, manifest=output_manifest, gate="BLOCK" if outcome.failed else "PASS")
+    except (OSError, UnsafeWriteError) as exc:
+        raise _fail(
+            "cannot publish output set; some exports may have changed; rerun all exports"
+        ) from exc
+    for path, _ in outputs:
+        _written(path)
+    if output_manifest is not None:
+        _written(output_manifest)
 
     _print_scan_summary(outcome, check_date)
 
     if outcome.failed:
         raise typer.Exit(code=EXIT_GATE_FAILED)
+
+
+@scan_app.command("verify-outputs")
+def verify_outputs(
+    manifest: Annotated[Path, typer.Option("--manifest", help="Completion marker to verify.")],
+) -> None:
+    """Check export completeness and hashes; a preserved BLOCK is still a valid set."""
+    try:
+        document = verify_output_manifest(manifest)
+    except (OSError, UnsafeWriteError) as exc:
+        raise _fail("output verification failed; regenerate all requested exports") from exc
+    typer.echo(f"complete: {len(document['artifacts'])} artifact(s); gate={document['gate']}")
 
 
 @policy_app.command("show")
@@ -700,6 +782,7 @@ def _print_scan_summary(outcome: ScanOutcome, check_date: date) -> None:
 
 
 @scan_app.command("normalize")
+@_metadata_command
 def normalize_scan(
     inputs: Annotated[
         list[Path] | None,
@@ -713,6 +796,12 @@ def normalize_scan(
         Path | None,
         typer.Option("--output", "-o", help="Write canonical JSON here instead of stdout."),
     ] = None,
+    minimize_metadata: Annotated[
+        bool,
+        typer.Option(
+            "--minimize-metadata", help="Omit caller prose; retain identity and location fields."
+        ),
+    ] = False,
     rules: Annotated[
         Path | None,
         typer.Option("--rules", help=RULES_HELP),

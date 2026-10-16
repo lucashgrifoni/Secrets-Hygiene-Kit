@@ -204,12 +204,25 @@ bridge. The bridge targets Hub 0.1.0 at the source revision documented in the
 [Hub guide](remediation-hub.md). Hub is a separate PreAlpha project; its reviewed
 local source is not evidence of a compatible published package.
 
-The bridge and `secguard.hub-preview/v1` remain experimental and may change in
+The bridge and its preview receipt remain experimental and may change in
 a minor secguard release with migration notes. Preview mode does not open a
 database. Applying an import requires an explicit isolated SQLite file and
 `--apply`; imports and preview files do not share an atomic transaction.
 Concurrent importers and production deployment require separate validation.
 The bridge does not post tracker issues or close remediation tasks.
+
+The unreleased candidate pins the clean consumer source, adds an import lock
+and replaces the experimental preview receipt with `secguard.hub-preview/v2`.
+See the Hub guide for source verification, installation and recovery. It does
+not promote Hub to stable support or change `secguard.remediation/v1`.
+
+## Unreleased additions
+
+The candidate adds opt-in completion manifests and metadata minimization;
+existing invocations, defaults, identity algorithms and stable schemas remain
+unchanged. `scan verify-outputs` reports artifact completeness, including sets
+from a blocked check; it does not turn that check into a pass.
+See [output safety](output-safety.md) and the [metadata policy](metadata-policy.md).
 
 ## Migrating from 0.5.0 to 1.0.0
 
