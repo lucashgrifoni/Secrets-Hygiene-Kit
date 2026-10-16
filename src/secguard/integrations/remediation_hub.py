@@ -11,7 +11,8 @@ import re
 import sqlite3
 import sys
 import tempfile
-from contextlib import closing
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,9 +25,11 @@ from secguard.core.remediation import (
     load_remediation_file,
     playbook_url,
 )
-from secguard.core.writing import UnsafeWriteError, assert_writable, is_link
+from secguard.core.writing import UnsafeWriteError, assert_output_paths, assert_writable, is_link
 
 HUB_VERSION = "0.1.0"
+HUB_SOURCE_REVISION = "fbd3b004b5eb7a3b5ffd29a83070292d4cadbf99"
+HUB_SOURCE_DIGEST = "f75703b426e51067becc6108c719bc1ba4f39ec5b0a3a66b2cb5e30a2f0bec8c"
 EXCHANGE_SCHEMA = "secguard.remediation/v1"
 DATABASE_APPLICATION_ID = 0x53475248  # SGRH: an operational marker, not authentication.
 
@@ -55,6 +58,7 @@ def _load_hub() -> SimpleNamespace:
         package = importlib.import_module("appsec_remediation_hub")
         if package.__version__ != HUB_VERSION:
             raise BridgeError("unsupported AppSec Remediation Hub version; expected 0.1.0")
+        _assert_hub_source(package)
         entities = importlib.import_module("appsec_remediation_hub.domain.entities")
         values = importlib.import_module("appsec_remediation_hub.domain.value_objects")
         enums = importlib.import_module("appsec_remediation_hub.domain.enums")
@@ -92,6 +96,23 @@ def _load_hub() -> SimpleNamespace:
         raise BridgeError(
             "AppSec Remediation Hub 0.1.0 is unavailable or incompatible in this environment"
         ) from exc
+
+
+def _assert_hub_source(package: Any) -> None:
+    """Compatibility pin for the reviewed source, not authentication or a sandbox."""
+    root = Path(package.__file__).parent
+    paths = sorted(root.rglob("*.py"))
+    if not paths or any(path.is_symlink() for path in paths):
+        raise BridgeError("unsupported Hub source; install the documented clean source wheel")
+    manifest = {
+        path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in paths
+    }
+    digest = hashlib.sha256(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    if digest != HUB_SOURCE_DIGEST:
+        raise BridgeError("unsupported Hub source; install the documented clean source wheel")
 
 
 def _digest(value: Any) -> str:
@@ -196,7 +217,7 @@ def _check_paths(input_path: Path, output: Path, database: Path | None) -> None:
         ):
             raise BridgeError("--database requires a SQLite file path")
         _guard_file(database)
-        for suffix in ("-journal", "-wal", "-shm"):
+        for suffix in ("-journal", "-wal", "-shm", ".secguard.lock"):
             sidecar = Path(str(database) + suffix)
             _guard_file(sidecar)
             destinations.append(sidecar)
@@ -207,6 +228,7 @@ def _check_paths(input_path: Path, output: Path, database: Path | None) -> None:
                 left.exists() and right.exists() and left.samefile(right)
             ):
                 raise BridgeError("input, database and issue output must be distinct files")
+    assert_output_paths(destinations[1:], [input_path])
 
 
 def _same_fields(actual: Any, expected: Any, fields: tuple[str, ...]) -> bool:
@@ -328,7 +350,41 @@ def _validate_existing(occurrences: list[_Occurrence], store: Any, hub: SimpleNa
     return changes
 
 
+@contextmanager
+def _database_lock(database: Path) -> Iterator[None]:
+    """Fail closed on overlapping bridge imports; an abrupt kill leaves a stale lock."""
+    lock = Path(str(database) + ".secguard.lock")
+    _guard_file(lock)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    _guard_file(lock)
+    try:
+        descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError as exc:
+        raise BridgeError(
+            "bridge database is locked; check for a running importer before recovery"
+        ) from exc
+    os.close(descriptor)
+    try:
+        yield
+    finally:
+        lock.unlink(missing_ok=True)
+
+
 def _apply(
+    run: Any,
+    occurrences: list[_Occurrence],
+    database: Path,
+    hub: SimpleNamespace,
+    output: Path | None = None,
+) -> tuple[int, int]:
+    with _database_lock(database):
+        if output is not None:
+            _guard_file(output)
+            output.unlink(missing_ok=True)
+        return _apply_locked(run, occurrences, database, hub)
+
+
+def _apply_locked(
     run: Any, occurrences: list[_Occurrence], database: Path, hub: SimpleNamespace
 ) -> tuple[int, int]:
     _claim_database(database)
@@ -483,6 +539,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--apply", action="store_true", help="write the explicitly named isolated database"
     )
+    import_started = database_committed = False
     try:
         args = parser.parse_args(argv)
         if args.apply and args.database is None:
@@ -493,10 +550,19 @@ def main(argv: list[str] | None = None) -> int:
         run, occurrences = _plan(document, hub)
         created = recovered = 0
         if args.apply:
-            created, recovered = _apply(run, occurrences, args.database, hub)
+            # Check renderer compatibility before changing persistence. An old
+            # preview must not describe a partially applied newer import.
+            _preview(document, occurrences, hub)
+            import_started = True
+            created, recovered = _apply(run, occurrences, args.database, hub, args.issues_output)
+            database_committed = True
         receipt = {
-            "schema": "secguard.hub-preview/v1",
+            "schema": "secguard.hub-preview/v2",
             "hub_version": HUB_VERSION,
+            "hub_source_revision": HUB_SOURCE_REVISION,
+            "hub_source_digest": HUB_SOURCE_DIGEST,
+            "run_id": run.id,
+            "database_committed": database_committed,
             "repo": document.repository,
             "dry_run": True,
             "applied": args.apply,
@@ -518,6 +584,18 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:
         print(
             "secguard hub: local handoff failed; review the isolated database and retry",
+            file=sys.stderr,
+        )
+    if database_committed:
+        print(
+            "secguard hub: database import completed; preview missing; "
+            "retry the same exchange to regenerate it",
+            file=sys.stderr,
+        )
+    elif import_started:
+        print(
+            "secguard hub: database may contain a partial import; "
+            "preserve it and retry the same exchange",
             file=sys.stderr,
         )
     return 2

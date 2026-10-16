@@ -87,8 +87,16 @@ automatic PR summaries, configure the composite action as described in
 
 Give each export a distinct path, separate from every input, the selected
 waiver file and any explicitly selected rule catalog. A conflicting destination
-exits with `2` before any export is written. Writes after preflight remain
-sequential: permission changes or other I/O errors may leave earlier exports.
+exits with `2` before any export is written. The unreleased implementation
+stages content and replaces whole files; sequential publication can still leave
+a mixed set after a later I/O error. Use the optional completion marker and
+verification command in [output safety](output-safety.md) when a consumer needs
+evidence that all selected exports were completed. Published 1.0.0 does not
+include these additions.
+
+The candidate also offers opt-in `--minimize-metadata` on `scan check`,
+`scan normalize` and `report`. Read the [field policy](metadata-policy.md) before
+sharing exports; identity and location metadata still require review.
 
 To hand off active findings, add `--remediation remediation.json --repository
 acme/example`. The [Hub bridge](remediation-hub.md) validates the exchange and

@@ -2,6 +2,11 @@
 
 Snapshot: 2026-10-15. Release line: 1.0.
 
+Unreleased work dated 2026-10-16 implements per-file output replacement and
+optional completion markers, optional caller-prose minimization and recovery
+improvements for the source-pinned experimental Hub bridge. These changes do
+not modify the published 1.0.0 release. See the [unreleased changelog](CHANGELOG.md#unreleased).
+
 The project remains a report-processing CLI: normalization, classification,
 combined findings, expiring waivers, build decisions, evidence output and
 provider response checklists.

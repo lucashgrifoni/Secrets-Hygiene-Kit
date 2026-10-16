@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import sqlite3
 from enum import StrEnum
@@ -510,3 +511,95 @@ def test_new_database_does_not_adopt_existing_sidecars(tmp_path, contract, suffi
     assert sidecar.read_bytes() == b"CANARY-FOREIGN-SIDECAR"
     assert not (tmp_path / "isolated.sqlite").exists()
     assert contract.constructors == 0
+
+
+@pytest.mark.parametrize("apply", [False, True])
+def test_receipt_names_source_run_and_persistence_separately(tmp_path, contract, apply):
+    assert bridge.main(_args(tmp_path, _exchange(tmp_path), apply=apply)) == 0
+    receipt = _receipt(tmp_path)
+    assert receipt["schema"] == "secguard.hub-preview/v2"
+    assert receipt["hub_source_revision"] == bridge.HUB_SOURCE_REVISION
+    assert receipt["hub_source_digest"] == bridge.HUB_SOURCE_DIGEST
+    assert receipt["database_committed"] is apply
+    assert receipt["run_id"].startswith("RUN-SG-")
+    assert receipt["dry_run"] is True  # Tracker payloads never leave this process.
+
+
+def test_output_failure_reports_committed_database_and_replay_regenerates_preview(
+    tmp_path, contract, monkeypatch, capsys
+):
+    exchange = _exchange(tmp_path)
+    preview = tmp_path / "issues.json"
+    preview.write_text("old preview")
+    original = bridge._write_output
+    monkeypatch.setattr(
+        bridge, "_write_output", lambda *_: (_ for _ in ()).throw(PermissionError())
+    )
+    assert bridge.main(_args(tmp_path, exchange, apply=True)) == 2
+    assert "database import completed; preview missing" in capsys.readouterr().err
+    assert not preview.exists()
+    before = copy.deepcopy(contract.tables)
+    monkeypatch.setattr(bridge, "_write_output", original)
+    assert bridge.main(_args(tmp_path, exchange, apply=True)) == 0
+    assert _receipt(tmp_path)["replayed"] == 1
+    assert contract.tables == before
+
+
+def test_partial_import_invalidates_old_preview_and_resumes_without_duplicates(tmp_path, contract):
+    assert bridge.main(_args(tmp_path, _exchange(tmp_path), apply=True)) == 0
+    contract.fail_task = True
+    exchange = _exchange(tmp_path, fingerprints=("a" * 64, "b" * 64))
+    assert bridge.main(_args(tmp_path, exchange, apply=True)) == 2
+    assert not (tmp_path / "issues.json").exists()
+    assert bridge.main(_args(tmp_path, exchange, apply=True)) == 0
+    assert _receipt(tmp_path)["recovered"] == 1
+    assert len(contract.tables["tasks"]) == 2
+
+
+def test_overlapping_import_is_refused_without_touching_previous_preview(tmp_path, contract):
+    database = tmp_path / "isolated.sqlite"
+    preview = tmp_path / "issues.json"
+    preview.write_text("previous complete preview")
+    with bridge._database_lock(database):
+        assert bridge.main(_args(tmp_path, _exchange(tmp_path), apply=True)) == 2
+        assert contract.constructors == 0
+        assert preview.read_text() == "previous complete preview"
+        assert not database.exists()
+    assert not Path(str(database) + ".secguard.lock").exists()
+
+
+def test_source_pin_rejects_modified_and_extra_python_files(tmp_path, monkeypatch):
+    package = tmp_path / "hub"
+    package.mkdir()
+    init = package / "__init__.py"
+    init.write_bytes(b'__version__ = "0.1.0"\n')
+    manifest = {"__init__.py": hashlib.sha256(init.read_bytes()).hexdigest()}
+    digest = hashlib.sha256(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    monkeypatch.setattr(bridge, "HUB_SOURCE_DIGEST", digest)
+    hub = SimpleNamespace(__file__=str(init))
+    bridge._assert_hub_source(hub)
+    init.write_bytes(b'__version__ = "0.1.0"\n# changed\n')
+    with pytest.raises(bridge.BridgeError, match="unsupported Hub source"):
+        bridge._assert_hub_source(hub)
+    init.write_bytes(b'__version__ = "0.1.0"\n')
+    (package / "unreviewed.py").write_text("pass\n")
+    with pytest.raises(bridge.BridgeError, match="unsupported Hub source"):
+        bridge._assert_hub_source(hub)
+
+
+def test_database_cannot_also_be_an_output_directory(tmp_path, contract):
+    database = tmp_path / "bridge.sqlite"
+    args = [
+        "--input",
+        str(_exchange(tmp_path)),
+        "--database",
+        str(database),
+        "--issues-output",
+        str(database / "preview.json"),
+        "--apply",
+    ]
+    assert bridge.main(args) == 2
+    assert contract.constructors == 0
+    assert not database.exists()

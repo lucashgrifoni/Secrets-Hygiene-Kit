@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- Stage report exports before publication and replace individual files through
+  same-directory temporary files. Add opt-in `--output-manifest` and
+  `scan verify-outputs` for checksummed completion evidence. Multi-file rollback
+  and filesystem isolation are not provided.
+- Add opt-in `--minimize-metadata` to check, normalize and report: remove caller
+  prose after deriving identities, retain stable schemas and gate semantics,
+  and minimize processing diagnostics. Identity/location fields still require
+  review before sharing.
+- Pin the experimental Hub bridge to the reviewed clean 0.1.0 source; reject
+  overlapping imports, invalidate stale previews and distinguish partial
+  imports from committed-database/output failures. The experimental receipt
+  changes to `secguard.hub-preview/v2`; downstream receipt consumers need an
+  explicit schema update. The stable remediation exchange is unchanged.
+
 ## [1.0.0] - 2026-10-15
 
 - Define the stable 1.x contract for the existing CLI, exit codes, document

@@ -4,12 +4,42 @@ Secguard exports active findings as `secguard.remediation/v1`. Its optional
 Python bridge converts that exchange into AppSec Remediation Hub findings,
 groups and tasks, and writes a local preview of GitHub issue payloads.
 
-The supported consumer contract is Hub `0.1.0` at source commit
-`fbd3b004b5eb7a3b5ffd29a83070292d4cadbf99`. Compatibility is checked against
-that local source and its current worktree. Hub is a separate PreAlpha project;
-this does not establish compatibility with a published package or release.
-Use an environment containing the reviewed Hub source and the secguard wheel.
-Hub remains optional for other secguard commands.
+The unreleased bridge accepts Hub `0.1.0` from the clean source commit
+`fbd3b004b5eb7a3b5ffd29a83070292d4cadbf99`. It checks the digest of all 55
+Python source files before loading consumer services. The expected source
+digest is `f75703b426e51067becc6108c719bc1ba4f39ec5b0a3a66b2cb5e30a2f0bec8c`;
+modified trees, extra Python files and other versions are rejected. This is a
+compatibility pin, not authentication, sandboxing or a dependency audit.
+The published 1.0.0 bridge keeps its earlier behavior.
+
+Hub is still a separate PreAlpha project. This bridge remains experimental,
+outside the stable 1.x guarantee. Testing a clean source-built wheel does not
+establish that an upstream distributed release is supported. Hub remains
+optional for all other secguard commands.
+
+## Reproduce the consumer environment
+
+Build from a Git archive of that exact commit, preserving its original bytes
+rather than an editable or CRLF-converted worktree. In a fresh virtual
+environment, install the source-built Hub wheel and the candidate secguard
+wheel. Do not install the Hub checkout with unrelated local modifications.
+
+```console
+python -m build path/to/clean-hub --outdir hub-dist
+python -m pip install hub-dist/appsec_remediation_hub-0.1.0-py3-none-any.whl path/to/secguard-candidate.whl
+python scripts/validate_hub.py --result hub-pilot.json
+```
+
+The validation script belongs to the secguard source checkout. It creates only
+synthetic exchanges and isolated temporary databases, uses installed packages,
+and records the actual Python, SQLAlchemy, Alembic and Pydantic versions.
+Its local Windows run is not a claim about other operating systems or future
+dependency resolutions. Keep its report and resolved environment for replay.
+
+Only the `python -m` bridge command is exercised as an integration interface.
+The Hub's migration helper can retain pooled connections until garbage
+collection in a long-lived process, including after Store disposal. In-process
+use of private Python helpers is not supported; run separate CLI processes.
 
 ## Export and preview
 
@@ -62,8 +92,12 @@ The bridge creates the Hub schema and writes only records belonging to the
 received occurrences. It uses the existing Hub models, secret correlation,
 scoring, SLA calculation and GitHub payload renderer. It does not run the Hub's
 global correlation, ownership routing or tracker synchronization commands.
-Do not share this database with concurrent importers or use it as a production
-integration without separate operational validation.
+Overlapping bridge imports are refused by an exclusively created
+`DATABASE.secguard.lock` file. Do not share the database with another writer
+that ignores this lock. A hard kill may leave a stale lock: confirm the importer
+has stopped, preserve the database and exchange, then remove only that lock
+before retrying. Never delete an active lock to force concurrent import.
+Production operation still requires separate validation.
 
 ## Mapping and replay
 
@@ -100,12 +134,25 @@ findings, groups and tasks while preserving existing records. A missing task
 can be recreated only for an open group. A task without its group, or a missing
 task for a closed or otherwise managed group, requires operator review and
 returns an error. There is no transaction spanning the database and preview
-file; review a failure before retrying against the same isolated database.
+file. After acquiring the import lock, the bridge removes any previous preview
+before applying changes. A failure cannot leave that old file presenting a new
+partial import as complete. A renderer-contract error is checked before import.
+
+If diagnostics say `database import completed; preview missing`, records were
+committed but output failed: retry the identical exchange to regenerate the
+preview without duplicating or resetting state. If the database may contain a
+partial import, preserve it and retry the same exchange; the recovery rules
+above apply. Do not recreate the database to clear an error. A busy lock leaves
+the previous preview untouched; it is still historical, not a new receipt.
 
 ## Review the issue preview
 
-The output is a `secguard.hub-preview/v1` receipt with `dry_run: true`, the
-repository, original gate, waived count, import counts and issue payloads.
+The unreleased output is a `secguard.hub-preview/v2` receipt with `dry_run: true`,
+the repository, original gate, waived count, import counts and issue payloads.
+It adds `hub_source_revision`, `hub_source_digest`, `run_id` and
+`database_committed`. Consumers of the experimental v1 receipt must select the
+v2 schema explicitly. `database_committed` describes database persistence;
+`dry_run` still describes tracker publication, which is never performed.
 Payloads contain the Hub's `title`, `body` and `labels`, plus a versioned
 provider response guide and the local task status. They cover only occurrences
 in the current exchange. Free-text titles and owners edited in the database

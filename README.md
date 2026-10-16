@@ -359,8 +359,11 @@ For `check`, `report` and `normalize`, use destinations distinct from every
 scanner input, the selected waiver policy and the explicitly selected rule
 catalog. Each export also needs a separate destination. Conflicts, file aliases
 and invalid file/directory layouts exit with `2` before any export is written.
-Outputs are written sequentially after preflight; a later I/O failure can still
-leave earlier exports, so the operation is not an atomic transaction.
+The unreleased candidate stages output and replaces whole files; a later
+publication failure can still leave a mixed set. Optional completion markers
+make that set verifiable. See [output safety](docs/output-safety.md) for
+guarantees and recovery, and [metadata minimization](docs/metadata-policy.md)
+for the opt-in field policy. These options are not in the published 1.0.0 wheel.
 
 Tests cover credential canaries, malformed payloads, terminal control characters,
 Markdown escaping, directory-aware waiver scope and linked output destinations.
@@ -380,6 +383,8 @@ severity suffixes; see the [migration notes](CHANGELOG.md#migration-notes).
 | [Detector compatibility](docs/detector-compatibility.md) | Fixed producer versions, fixture provenance and reproduction |
 | [Compatibility and support](docs/compatibility.md) | Stable 1.x interfaces, schema evolution, support and migration |
 | [OPA and DefectDojo](docs/integrations.md) | Offline file exports, policy evaluation and stable reimport |
+| [Output safety](docs/output-safety.md) | Per-file replacement, completion markers and failure recovery |
+| [Metadata policy](docs/metadata-policy.md) | Opt-in prose minimization, preserved identity and disclosure limits |
 | [Changelog](CHANGELOG.md) | Release changes and migration notes |
 | [Project status](STATUS.md) | Current scope and known limitations |
 

@@ -13,13 +13,140 @@ symlink by design; below it, the tree is whatever the checkout contains.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
+import re
 import stat
+import tempfile
 from pathlib import Path
 
 
 class UnsafeWriteError(Exception):
     """Raised for a linked, unusable, or conflicting output destination."""
+
+
+def _stage_output(path: Path, content: str) -> Path:
+    """Prepare an exclusive UTF-8 file on the destination filesystem."""
+    assert_output_paths([path], [])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    assert_output_paths([path], [])
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            dir=path.parent,
+            prefix=".secguard-",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        return temporary
+    except BaseException:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+        raise
+
+
+def write_outputs(
+    outputs: list[tuple[Path, str]], *, manifest: Path | None = None, gate: str = "PASS"
+) -> None:
+    """Stage all content, replace each file, publish an optional completion marker last.
+
+    Each replace preserves its old destination on failure. Multiple replaces do
+    not form a transaction. A marker from an earlier run is removed before the
+    first replace, so a partially published set never retains a valid marker.
+    No concurrent writer or power-loss/directory-durability guarantee is made.
+    """
+    destinations = [path for path, _ in outputs]
+    assert_output_paths([*destinations, *([manifest] if manifest is not None else [])], [])
+    if manifest is not None and (not outputs or gate not in {"PASS", "BLOCK"}):
+        raise UnsafeWriteError("a completion manifest requires file exports and a valid decision")
+    staged: list[tuple[Path, Path]] = []
+    try:
+        for path, content in outputs:
+            staged.append((path, _stage_output(path, content)))
+        if manifest is not None:
+            payload = {
+                "schema": "secguard.outputs/v1",
+                "complete": True,
+                "gate": gate,
+                "artifacts": [
+                    {
+                        "path": path.absolute().as_posix(),
+                        "bytes": len(content.encode("utf-8")),
+                        "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                    }
+                    for path, content in outputs
+                ],
+            }
+            staged.append((manifest, _stage_output(manifest, json.dumps(payload, indent=2) + "\n")))
+        # Recheck the whole set after directory creation and staging, before
+        # invalidating a previous completion marker or publishing anything.
+        assert_output_paths([path for path, _ in staged], [])
+        if manifest is not None:
+            manifest.unlink(missing_ok=True)
+        for path, temporary in staged:
+            assert_output_paths([path], [])
+            os.replace(temporary, path)
+    finally:
+        for _, temporary in staged:
+            temporary.unlink(missing_ok=True)
+
+
+def verify_output_manifest(path: Path) -> dict:
+    """Verify a bounded completion marker and every named artifact without writing."""
+    with path.open("rb") as stream:
+        raw = stream.read(1024 * 1024 + 1)
+    try:
+        if len(raw) > 1024 * 1024:
+            raise ValueError
+        document = json.loads(raw)
+        if (
+            not isinstance(document, dict)
+            or set(document) != {"schema", "complete", "gate", "artifacts"}
+            or document["schema"] != "secguard.outputs/v1"
+            or document["complete"] is not True
+            or document["gate"] not in {"PASS", "BLOCK"}
+            or not isinstance(document["artifacts"], list)
+            or not 1 <= len(document["artifacts"]) <= 1000
+        ):
+            raise ValueError
+        seen: set[Path] = set()
+        for item in document["artifacts"]:
+            if (
+                not isinstance(item, dict)
+                or set(item) != {"path", "bytes", "sha256"}
+                or not isinstance(item["path"], str)
+                or type(item["bytes"]) is not int
+                or item["bytes"] < 0
+                or not isinstance(item["sha256"], str)
+                or re.fullmatch(r"[0-9a-f]{64}", item["sha256"]) is None
+            ):
+                raise ValueError
+            artifact = Path(item["path"])
+            if not artifact.is_absolute() or artifact in seen or not artifact.is_file():
+                raise ValueError
+            seen.add(artifact)
+            assert_writable(artifact)
+            digest = hashlib.sha256()
+            size = 0
+            with artifact.open("rb") as stream:
+                while block := stream.read(1024 * 1024):
+                    size += len(block)
+                    digest.update(block)
+            if size != item["bytes"] or digest.hexdigest() != item["sha256"]:
+                raise ValueError
+    except (ValueError, TypeError, RecursionError, UnicodeError) as exc:
+        raise UnsafeWriteError(
+            "invalid or incomplete output set; regenerate all requested exports"
+        ) from exc
+    return document
 
 
 def assert_output_paths(outputs: list[Path], protected: list[Path]) -> None:
