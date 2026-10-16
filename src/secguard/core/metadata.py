@@ -17,6 +17,7 @@ from secguard.core.waivers import WaiverDocument
 
 _MINIMIZE = ContextVar("secguard_minimize_metadata", default=False)
 OMITTED = "Metadata omitted by operator request."
+MINIMIZED_TITLE = "Secret finding"
 
 
 @contextmanager
@@ -42,7 +43,7 @@ def minimize_findings(document: FindingDocument) -> FindingDocument:
                     update={
                         "message": OMITTED,
                         "remediation": None,
-                        "secret_title": "Secret finding",
+                            "secret_title": MINIMIZED_TITLE,
                     }
                 )
                 for finding in document.findings
@@ -72,7 +73,7 @@ def minimize_catalog(catalog: RuleCatalog) -> RuleCatalog:
     return catalog.model_copy(
         update={
             "secret_types": {
-                key: spec.model_copy(update={"title": "Secret finding"})
+            key: spec.model_copy(update={"title": MINIMIZED_TITLE})
                 for key, spec in catalog.secret_types.items()
             }
         }
